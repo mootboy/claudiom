@@ -31,6 +31,6 @@
     "preversion": "npm run ci"
   },
   "devDependencies": {
-    "shadow-cljs": "3.5.3"
+    "shadow-cljs": "3.5.5"
   }
 }
