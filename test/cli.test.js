@@ -27,7 +27,7 @@ test("compiled CLI is inert and rejects unknown commands", () => {
   }
 });
 
-test("exact tarball runs without compiler, JVM, credentials or Adam", () => {
+test("exact tarball runs without compiler, JVM or model credentials", () => {
   const root = mkdtempSync(path.join(tmpdir(), "claudiom-package-"));
   try {
     const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", root],
@@ -42,6 +42,9 @@ test("exact tarball runs without compiler, JVM, credentials or Adam", () => {
     assert.equal(result.version, manifest.version);
     assert.equal(result.enabled, false);
     assert.ok(packed.files.some(file => file.path === "dist/claudiom.js"));
+    assert.ok(packed.files.some(file => file.path === "LICENSE"));
+    assert.equal(JSON.parse(readFileSync(path.join(pkg, "package.json"), "utf8")).license, "GPL-3.0-only");
+    assert.match(readFileSync(path.join(pkg, "LICENSE"), "utf8"), /GNU GENERAL PUBLIC LICENSE/);
     assert.ok(!packed.files.some(file => file.path.startsWith("src/")));
   } finally {
     rmSync(root, { recursive: true, force: true });

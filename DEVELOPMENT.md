@@ -8,11 +8,11 @@
 4. Before a PR: `npm run clean && npm test`, stage generated `dist/claudiom.js`, then `npm run ci` and `git diff --check`. Review generated changes before committing.
 5. Normal tests are offline and use private synthetic state. Real Claude/provider probes must be explicitly opt-in, isolated and cost-bounded; that test path is not implemented yet.
 
-No JVM/compiler is required to run the published CLI. The package smoke test extracts the exact tarball into an empty consumer and runs it with no PATH, model credentials or Adam.
+No JVM/compiler is required to run the published CLI. The package smoke test extracts the exact tarball into an empty consumer and runs it with no PATH, compiler or model credentials.
 
 ## GitHub setup (not performed)
 
-Create/configure the remote separately, enable PR protection and require both Node matrix checks. Disable squash merging. Workflow third-party actions use Adam's reviewed full-SHA pins. Dependabot ignores automatic major npm upgrades.
+Create/configure the remote separately, enable PR protection and require both Node matrix checks. Disable squash merging. Third-party workflow actions are pinned to reviewed full commit SHAs. Dependabot ignores automatic major npm upgrades.
 
 ## Release procedure
 

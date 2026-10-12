@@ -2,7 +2,7 @@
   "name": "@mootboy/claudiom",
   "version": "0.0.0",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-only",
   "description": "Independent observational memory for Claude Code",
   "type": "module",
   "bin": {
@@ -13,6 +13,7 @@
     "dist/claudiom.js",
     "README.md",
     "CHANGELOG.md",
+    "LICENSE",
     "docs/"
   ],
   "engines": {

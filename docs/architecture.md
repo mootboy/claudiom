@@ -4,9 +4,11 @@ Status: bootstrap implemented; producer behavior planned.
 
 ## Ownership
 
-Claude Code owns its heterogeneous parent/subagent transcripts. Claudiom reads them and owns native generation, storage, listing, recall and source coverage. Adam independently owns any future integration adapter. No Adam imports, Neo4j, Adam protocol exports, notifications or worker commands.
+Claude Code owns its heterogeneous parent/subagent transcripts. Claudiom reads them and owns generation, native storage, listing, recall and source coverage. It is a self-contained producer with no external memory service or database dependency.
 
-Use Node standard library plus compiled ClojureScript. No Pi Durable, generic adapter framework, daemon service or polling layer for 0.1.0 unless a measured requirement warrants it.
+[Observations and reflections](memory-model.md) are different memory types: observations retain source-grounded findings; reflections synthesize committed observations and retain their supporting IDs. Coverage tracks successful processing and is not memory content.
+
+Use Node standard library plus compiled ClojureScript. No additional agent harness, generic adapter framework, daemon service or polling layer for 0.1.0 unless a measured requirement warrants it.
 
 ## Planned execution
 
@@ -28,7 +30,7 @@ Model work is disabled until affirmative opt-in. Default direction: explicit app
 
 Native append-only logs are generation authority. Commit successful observations/reflections and corresponding coverage in one event; a valid no-memory outcome commits coverage with empty memory. Fold that log on restart before consulting disposable checkpoints. Failure/cancellation never commits coverage. A crash before commit may regenerate and incur another call; after durable commit, retry must not duplicate logical generation.
 
-Native persistence, citation identity, partial-tail recovery and exact limits must be frozen and fixture-tested in the first implementation increment. Do not copy Adam's protocol rules without a producer requirement.
+Native persistence, citation identity, partial-tail recovery and exact limits must be frozen and fixture-tested in the first implementation increment. The native format is defined by this project's generation, recovery and recall requirements.
 
 Proposed paths: XDG data for authoritative native logs; XDG state for locators/checkpoints/leases/content-free bounded diagnostics; XDG config for explicit consent/provider settings. Require absolute roots, owner-only non-symlink storage and hashed session path components. Initial supported platform: Linux; macOS/Windows require separate detached-boundary evidence.
 
@@ -38,4 +40,4 @@ Preserve raw source locators and session/stream provenance. Explicit UUID parent
 
 ## Retrieval
 
-Independent listing and recall are required with Adam absent. Native citations must support source expansion while clearly reporting missing transcripts. MCP retrieval is explicit/read-only; no automatic prompt injection in 0.1.0. Native logs remain usable without model credentials.
+Listing and recall read Claudiom's native persisted memories directly. Native citations must support source expansion while clearly reporting missing transcripts. MCP retrieval is explicit/read-only; no automatic prompt injection in 0.1.0. Native logs remain usable without model credentials.

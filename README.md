@@ -19,10 +19,12 @@ npm run ci
 
 ## Boundaries
 
-Claude transcripts are read-only input. Claudiom owns its native memories and independent recall. Adam may later add its own reader; Claudiom does not know Adam exists. Pi Durable is not a dependency.
+Claude transcripts are read-only input. Claudiom owns generation, native persistence, listing and recall, with no external memory service or agent harness dependency.
+
+An **observation** retains a source-grounded decision or finding. A **reflection** synthesizes committed observations into higher-level understanding, with traceable support. See the planned [memory model](docs/memory-model.md).
 
 See [architecture](docs/architecture.md), [release plan](docs/plan-0.1.0.md) and [issues](docs/issues/README.md).
 
 ## Distribution
 
-Private/unlicensed bootstrap. Licensing and GitHub repository setup require a separate decision before public release. CI is prepared for Node 22.19/24; release automation validates a manually approved post-merge version tag and publishes a tested tarball/checksum, not npm. Nothing auto-publishes from this bootstrap.
+Licensed [GPL-3.0-only](LICENSE). The package remains private (no npm publication); GitHub visibility and remote setup are still undecided. CI is prepared for Node 22.19/24; release automation validates a manually approved post-merge version tag and publishes a tested tarball/checksum, not npm. Nothing auto-publishes from this bootstrap.
