@@ -44,6 +44,9 @@
              (is (s/valid? :claudiom.store/citation (:citation entry)))))
          (is (nil? (:coverage (selected loc fold {}))))
          (is (.equals before (fs/readFileSync p)))
+         (fs/renameSync p (path/join dir "old-inode"))
+         (fs/writeFileSync p before)
+         (is (nil? (:coverage (selected loc fold {}))))
          ;; Finish the old partial tail with a malformed line, which is processed.
          (fs/appendFileSync p "\n")
          (let [next (selected loc fold {})]
@@ -254,6 +257,10 @@
      (let [p (path/join dir "source") data "{}\r\n" c {:path p :locator {:start 0 :end 4 :sha256 (sha data)}}
            verify (fn [citation] (get-in (source/verify-memory {:citations [citation]}) [:citations 0 :source_status]))]
        (fs/writeFileSync p data)
+       (with-redefs [source/read-chunk! (fn [& _] (throw (js/Error. "Private read failure")))]
+         (is (= "unreadable" (verify c))))
+       (with-redefs [source/open-source! (fn [_] (throw (js/Object.assign (js/Error. "Private permission failure") #js {:code "EACCES"})))]
+         (is (= "unreadable" (verify c))))
        (is (= "verified" (verify c)))
        (is (= "verification_limited" (get-in (source/verify-memory {:citations [c]} {:bytes 3}) [:citations 0 :source_status])))
        (is (= ["verified" "verification_limited"]
