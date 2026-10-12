@@ -37,7 +37,7 @@ function installSyntheticFixture(root, session = "synthetic") {
     recorded_at: "2026-10-12T12:00:00Z", kind: "generation",
     coverage: { prefix_sha256: "a".repeat(64), lane: "observation", input_id: "parent-1", from: 0, to: 100 },
     memories: [{ id: "observation-1", kind: "observation", text: "Synthetic decision.", source_time: null,
-      citations: [{ citation_version: 1, stream: "parent", agent_id: null, source_id: null, path: "/synthetic/unavailable.jsonl",
+      citations: [{ citation_version: 1, stream: "parent", agent_id: null, source_id: null, path: path.join(root, "unavailable.jsonl"),
         locator: { input_id: "parent-1", start: 0, end: 100, sha256: "a".repeat(64) } }] }] };
   const reflection = { ...observation, event_id: "fixture-2",
     coverage: { lane: "reflection", input_id: "feed-1", from: 0, to: 1 },
@@ -56,7 +56,7 @@ test("packaged reader retrieves synthetic native memories across processes", () 
     assert.equal(JSON.parse(invoke(cli, ["list"], root, env))[0].id, "urn:claudiom:synthetic:observation-1");
     const recalled = JSON.parse(invoke(cli, ["recall", "urn:claudiom:synthetic:observation-1", "--session", session], root, env));
     assert.equal(recalled.text, "Synthetic decision.");
-    assert.equal(recalled.citations[0].source_status, "not_checked");
+    assert.equal(recalled.citations[0].source_status, "missing");
     assert.equal(recalled.local_id, "observation-1");
     assert.equal(JSON.parse(invoke(cli, ["recall", "observation-1", "--session", session], root, env)).id, recalled.id);
     assert.equal(spawnSync(process.execPath, [cli, "recall", "observation-1"], { cwd: root, env }).status, 2);
@@ -85,6 +85,36 @@ test("packaged reader retrieves synthetic native memories across processes", () 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("recall verifies synthetic ranges and supports without expanding source content", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "claudiom-verify-"));
+  const env = { PATH: "", HOME: root, XDG_DATA_HOME: root };
+  const cli = path.join(repository, "cli.js");
+  try {
+    const { dir } = installSyntheticFixture(root);
+    const log = path.join(dir, "events.jsonl");
+    const source = path.join(root, "source.jsonl");
+    const bytes = "PRIVATE_SOURCE_SENTINEL\r\n";
+    writeFileSync(source, bytes);
+    const events = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    events[0].coverage = { lane: "observation", input_id: "parent#0", from: 0, to: Buffer.byteLength(bytes), prefix_sha256: digest };
+    events[0].memories[0].citations[0].path = source;
+    events[0].memories[0].citations[0].locator = { input_id: "parent#0", start: 0, end: Buffer.byteLength(bytes), sha256: digest };
+    writeFileSync(log, events.map(JSON.stringify).join("\n") + "\n");
+    const before = readFileSync(log);
+    const recall = () => JSON.parse(invoke(cli, ["recall", "urn:claudiom:synthetic:reflection-1"], root, env));
+    assert.equal(JSON.parse(invoke(cli, ["list"], root, env))[0].citations[0].source_status, "not_checked");
+    const result = recall();
+    assert.equal(result.supporting_observations[0].citations[0].source_status, "verified");
+    assert.ok(!JSON.stringify(result).includes("PRIVATE_SOURCE_SENTINEL"));
+    writeFileSync(source, bytes.replace("PRIVATE", "CHANGED"));
+    assert.equal(recall().supporting_observations[0].citations[0].source_status, "changed");
+    rmSync(source);
+    assert.equal(recall().supporting_observations[0].citations[0].source_status, "missing");
+    assert.deepEqual(readFileSync(log), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("readers warn about tails without writes; explicit repair is separate", () => {
@@ -175,7 +205,7 @@ test("exact tarball runs without compiler, JVM or model credentials", () => {
     assert.equal(recalled.supporting_observations[0].text, "Synthetic decision.");
     assert.deepEqual(recalled.supports, ["urn:claudiom:synthetic:observation-1"]);
     assert.equal(recalled.supporting_observations[0].id, recalled.supports[0]);
-    assert.equal(recalled.supporting_observations[0].citations[0].source_status, "not_checked");
+    assert.equal(recalled.supporting_observations[0].citations[0].source_status, "missing");
     assert.deepEqual(JSON.parse(invoke(cli, ["recall", "urn:claudiom:synthetic:reflection-1"], consumer, env)), recalled);
     assert.equal(readFileSync(path.join(dir, "events.jsonl"), "utf8"), before);
     assert.ok(packed.files.some(file => file.path === "dist/claudiom.js"));
