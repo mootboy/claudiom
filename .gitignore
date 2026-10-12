@@ -7,3 +7,4 @@ target/
 .nrepl-port
 *.tgz
 release-assets/
+docs/reviews/

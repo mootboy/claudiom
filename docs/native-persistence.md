@@ -18,6 +18,8 @@ Every event has `version` (1), `event_id`, `session_id`, `recorded_at` (UTC RFC3
 
 ### Public memory identity
 
+`urn:claudiom` is a private, unregistered namespace used by this application; `claudiom` is not an IANA-registered URN namespace under RFC 8141. No public namespace registration or external resolver is claimed.
+
 Retrieval exposes `id` as `urn:claudiom:<session>:<memory>` and adds `local_id` containing the stored ID. Each component is the original session/local ID encoded as UTF-8 percent escapes, with only ASCII letters, digits and `-._~` left literal; escapes use uppercase hex. No normalization of either original identifier is performed. Empty components, invalid UTF-8 escapes, noncanonical encodings, query/fragment suffixes and unsupported namespaces are rejected. The maximum is 1550 ASCII characters (13-character prefix, two components of at most 768 characters, and one separator). Example: session `session:one`, memory `memory/one` becomes `urn:claudiom:session%3Aone:memory%2Fone`.
 
 On disk, memory definitions, supports and lifecycle references remain session-local. Public `supports` and `supersession.replacement_id` are qualified URNs, including in supporting observations. This is a pre-release reader-contract change; existing valid local-ID logs require no rewrite or migration.

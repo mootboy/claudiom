@@ -39,20 +39,34 @@ These remain decision gates, not permission to assume undocumented Claude transc
 
 ## Acceptance criteria
 
-- [ ] The native format, storage paths, safety rules, limits and CLI contract are documented with synthetic examples.
-- [ ] A commit containing observations and coverage survives process restart and is directly usable through `list` and `recall`.
-- [ ] A successful empty commit advances durable coverage without creating memory; replay after restart does not create a second logical generation.
-- [ ] Memory and coverage commit together. Validation failure, failed append, cancellation or incomplete commit never advances recovered coverage.
-- [ ] Identical replay, conflicting replay, corrections, tombstones and drop-before-definition follow the documented contract without silently overwriting first definitions.
-- [ ] Parent/subagent and UUID-less citations round-trip; recall preserves attribution, session/stream provenance and recording time. Citations carry an independent format version.
-- [ ] Coverage for a parent stream and its subagent streams advances and recovers independently.
-- [ ] Reflection support validation rejects unsupported references; recall can explain a reflection through preserved dropped observations.
-- [ ] Crash/restart fixtures cover incomplete tails, the separate repair process, writer refusal before repair, read-only retrieval over an unrepaired tail, crash after durable append but before acknowledgement, and coverage reconstruction without checkpoints.
-- [ ] Malformed input and oversized records/reads fail according to bounded, documented behavior without exposing private content in diagnostics.
-- [ ] Filesystem interface tests verify private permissions, invalid roots and symlink rejection without touching host state.
-- [ ] Packaged CLI tests demonstrate list/recall after restart without credentials or model calls, including missing memory/source behavior.
-- [ ] Tests focus on interfaces with parameterized cases; property-based tests cover fold/replay invariants where applicable. Fixtures are synthetic and state is private temporary storage.
-- [ ] `npm test` passes; clean release output is regenerated in `dist/claudiom.js`. Completion records test/evidence links, not just code.
+- [x] The native format, storage paths, safety rules, limits and CLI contract are documented with synthetic examples.
+  - Evidence: [contract and synthetic example](../native-persistence.md), [`citation-version-is-required-and-independent`](../../test/cljs/claudiom/store_test.cljs#L335), [`urn-encoding-and-validation`](../../test/cljs/claudiom/store_test.cljs#L198).
+- [x] A commit containing observations and coverage survives process restart and is directly usable through `list` and `recall`.
+  - Evidence: [`exact tarball runs without compiler, JVM or model credentials`](../../test/cli.test.js#L154), [`empty-commit-restart-and-replay`](../../test/cljs/claudiom/store_test.cljs#L23).
+- [x] A successful empty commit advances durable coverage without creating memory; replay after restart does not create a second logical generation.
+  - Evidence: [`empty-commit-restart-and-replay`](../../test/cljs/claudiom/store_test.cljs#L23), [`generated-replay-invariants`](../../test/cljs/claudiom/store_test.cljs#L307).
+- [x] Memory and coverage commit together. Validation failure, failure/cancellation before a complete commit, or an incomplete commit never advances recovered coverage; complete-frame uncertain acknowledgements resolve through replay.
+  - Evidence: [`failed-commits-do-not-change-coverage`](../../test/cljs/claudiom/store_test.cljs#L37), [`interrupted-write-never-covers-source`](../../test/cljs/claudiom/store_test.cljs#L169), [`short-writes-and-uncertain-acknowledgement`](../../test/cljs/claudiom/store_test.cljs#L151). Cancellation before commit means no complete event; producer cancellation is deferred to generation.
+- [x] Identical replay, conflicting replay, corrections, tombstones and drop-before-definition follow the documented contract without silently overwriting first definitions.
+  - Evidence: [`generated-replay-invariants`](../../test/cljs/claudiom/store_test.cljs#L307), [`memory-lifecycle-and-independent-recall`](../../test/cljs/claudiom/store_test.cljs#L92), [`drop-before-definition-and-invalid-support`](../../test/cljs/claudiom/store_test.cljs#L117).
+- [x] Parent/subagent and UUID-less citations round-trip; recall preserves attribution, session/stream provenance and recording time. Citations carry an independent format version.
+  - Evidence: [`utf8-item-and-locator-boundaries`](../../test/cljs/claudiom/store_test.cljs#L236), [`citation-version-is-required-and-independent`](../../test/cljs/claudiom/store_test.cljs#L335), [`packaged reader retrieves synthetic native memories across processes`](../../test/cli.test.js#L50).
+- [x] Coverage for a parent stream and its subagent streams advances and recovers independently.
+  - Evidence: [`contiguous-independent-progress`](../../test/cljs/claudiom/store_test.cljs#L72), [`generated-replay-invariants`](../../test/cljs/claudiom/store_test.cljs#L307). These exercise independent observation input IDs; mapping actual Claude parent/subagent streams is stage 2.
+- [x] Reflection support validation rejects unsupported references; recall can explain a reflection through preserved dropped observations.
+  - Evidence: [`drop-before-definition-and-invalid-support`](../../test/cljs/claudiom/store_test.cljs#L117), [`memory-lifecycle-and-independent-recall`](../../test/cljs/claudiom/store_test.cljs#L92), [`exact tarball runs without compiler, JVM or model credentials`](../../test/cli.test.js#L154).
+- [x] Crash/restart fixtures cover incomplete tails, the separate repair process, writer refusal before repair, read-only retrieval over an unrepaired tail, crash after durable append but before acknowledgement, and coverage reconstruction without checkpoints.
+  - Evidence: [`tail-repair-and-corruption`](../../test/cljs/claudiom/store_test.cljs#L51), [`complete-json-without-lf-is-uncommitted`](../../test/cljs/claudiom/store_test.cljs#L345), [`short-writes-and-uncertain-acknowledgement`](../../test/cljs/claudiom/store_test.cljs#L151), [`repair-retry-syncs-after-uncertain-truncation`](../../test/cljs/claudiom/store_test.cljs#L383), [`readers warn about tails without writes; explicit repair is separate`](../../test/cli.test.js#L90). Crash boundaries are simulated, not power-loss proof.
+- [x] Malformed input and oversized records/reads fail according to bounded, documented behavior without exposing private content in diagnostics.
+  - Evidence: [`malformed-frames-and-bounds`](../../test/cljs/claudiom/store_test.cljs#L133), [`bounded-log-and-tail-reads`](../../test/cljs/claudiom/store_test.cljs#L266), [`utf8-item-and-locator-boundaries`](../../test/cljs/claudiom/store_test.cljs#L236), [`packaged reader retrieves synthetic native memories across processes`](../../test/cli.test.js#L50).
+- [x] Filesystem interface tests verify private permissions, invalid roots and symlink rejection without touching host state.
+  - Evidence: [`unsafe-storage-is-rejected`](../../test/cljs/claudiom/store_test.cljs#L408), [`empty-commit-restart-and-replay`](../../test/cljs/claudiom/store_test.cljs#L23).
+- [x] Packaged CLI tests demonstrate list/recall after restart without credentials or model calls, including missing memory/source behavior.
+  - Evidence: [`exact tarball runs without compiler, JVM or model credentials`](../../test/cli.test.js#L154), [`packaged reader retrieves synthetic native memories across processes`](../../test/cli.test.js#L50), [`an unrelated torn tail does not make a missing memory unavailable`](../../test/cli.test.js#L128). Citation expansion is deferred; stored citations honestly report `not_checked`.
+- [x] Tests focus on interfaces with parameterized cases; property-based tests cover fold/replay invariants where applicable. Fixtures are synthetic and state is private temporary storage.
+  - Evidence: [`generated-replay-invariants`](../../test/cljs/claudiom/store_test.cljs#L307), [`utf8-item-and-locator-boundaries`](../../test/cljs/claudiom/store_test.cljs#L236), [`unsafe-storage-is-rejected`](../../test/cljs/claudiom/store_test.cljs#L408). The store suite uses `private-state`; packaged tests create/remove private synthetic temporary state.
+- [x] `npm test` passes; clean release output is regenerated in `dist/claudiom.js`. Completion records test/evidence links, not just code.
+  - Evidence: [validation record below](#implementation-evidence), [`exact tarball runs without compiler, JVM or model credentials`](../../test/cli.test.js#L154), [committed runtime](../../dist/claudiom.js). `npm test` and `npm run check:dist` passed.
 
 ## Implementation evidence
 
