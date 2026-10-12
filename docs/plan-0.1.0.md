@@ -36,7 +36,7 @@ Build the smallest private-file writer/fold plus `list` and `recall <id>` CLI. U
 
 ### 2. Claude source reader and context selection
 
-Read explicitly provided parent/subagent locators, preserve source/citation provenance and detect mutations/partial appends. The throwaway structural scan and user-run manual checks are recorded in [Claude transcript findings](claude-transcripts.md); no repository probe slice is needed. D1 prefix/incarnation rules are frozen, hook paths are absolute, missing subagent sources are no-ops, and attachment records follow the user-approved allowlist in [003](issues/003-claude-source-reader-and-context-selection.md). Select only bounded relevant content and verify recalled citations read-only; never ship private transcripts as fixtures. Final review and the user's explicit ready decision precede implementation.
+Read explicitly provided parent/subagent locators, preserve source/citation provenance and detect mutations/partial appends. The throwaway structural scan and user-run manual checks are recorded in [Claude transcript findings](claude-transcripts.md); no repository probe slice is needed. D1 prefix/incarnation rules are frozen, hook paths are absolute, missing subagent sources are no-ops, and attachment records follow the user-approved allowlist in [003](issues/003-claude-source-reader-and-context-selection.md). Select only bounded relevant content and verify recalled citations read-only; never ship private transcripts as fixtures. The user marked 003 ready and authorized implementation; the source/selection/verification slice is now ready for review/acceptance.
 
 ### 3. Bounded observation generation tracer bullet
 

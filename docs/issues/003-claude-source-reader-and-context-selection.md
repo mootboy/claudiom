@@ -10,7 +10,7 @@
 
 ## Goal and boundary
 
-Provide a bounded, read-only reader for explicitly supplied Claude parent/subagent streams, deterministic citation-bearing context selection for stage 3, and citation verification during `recall` without returning source content. The user approved the contract below. The [structural findings and manual checks](../claude-transcripts.md) are complete and the attachment-record policy is approved. No open user decisions remain and both approved final-review fixes are incorporated; the user's explicit ready decision still gates the reader, selector, citation verification and native coverage amendment. There is no repository probe slice, probe code or probe PR.
+Provide a bounded, read-only reader for explicitly supplied Claude parent/subagent streams, deterministic citation-bearing context selection for stage 3, and citation verification during `recall` without returning source content. The user approved the contract below. The [structural findings and manual checks](../claude-transcripts.md) are complete and the attachment-record policy is approved. No open user decisions remain and both approved final-review fixes are incorporated. The user marked 003 ready and authorized implementation; implementation is complete and ready for review, not yet accepted. There is no repository probe slice, probe code or probe PR.
 
 Read with [architecture](../architecture.md), [memory semantics](../memory-model.md), [Claude integration guidance](../claude-integration.md), and the [native persistence contract](../native-persistence.md). Hook fields are documented input contracts; observed transcript shapes are evidence, not a guaranteed Claude schema.
 
@@ -21,7 +21,7 @@ Stage 2 returns candidate identities, ranges and prefix digests, not authoritati
 1. **Completed:** the throwaway read-only structural scan is recorded in [Claude transcript findings](../claude-transcripts.md), including observed shapes/enums and record-version scope. It is not repository code, a shipped interface, or a PR; no probe implementation or redaction/sentinel test suite is part of 003.
 2. **Completed user checks:** `/clear` creates a new session file; `/compact`, `--resume` and fork preserved the prior byte prefix, with no rewrite observed. D6 is satisfied and the D1 prefix/incarnation contract below is frozen. Hook paths are absolute; no tilde expansion is needed. Missing subagent sources are normal no-ops.
 3. **Approved policy:** use the attachment-type allowlist below. Findings, manual outcomes and the policy are recorded in `docs/claude-transcripts.md`; commit findings only, never transcripts or hook payloads.
-4. **Final-review fixes complete:** the user then marks 003 ready for reader/selection/verification and the scoped native schema/spec/fixture amendment. No implementation is authorized until that explicit decision; user merges without squash.
+4. **Authorized and implemented:** the user marked 003 ready for reader/selection/verification and the scoped native schema/spec/fixture amendment. Review/acceptance is pending; user merges without squash.
 
 ## Explicit locators and source safety
 
@@ -60,7 +60,7 @@ Normal-sized records count against the parsed-byte budget even if parsing leads 
 
 ## Incarnation and resume integrity
 
-Amend unreleased native v1 observation coverage with required `prefix_sha256`: SHA-256 of source bytes `[0, to)`, computed from the read snapshot and committed atomically with coverage and memories, including successful empty commits. Reflection coverage is unchanged. Update specs and synthetic fixtures when implementation is authorized; there is no migration or compatibility reader for older pre-release observation coverage. No XDG-state sidecar is introduced.
+Amend unreleased native v1 observation coverage with required `prefix_sha256`: SHA-256 of source bytes `[0, to)`, computed from the read snapshot and committed atomically with coverage and memories, including successful empty commits. Reflection coverage is unchanged. Specs and synthetic fixtures are updated; there is no migration or compatibility reader for older pre-release observation coverage. No XDG-state sidecar is introduced.
 
 Coverage is already scoped by `(session_id, lane, input_id)`, so the stream key contains no session ID: `parent` for the parent or `agent:<agent_id>` for a subagent. Use **`input_id = parent#<n>` or `agent:<agent_id>#<n>`**. Paths, inodes and record content are not identity inputs; the fold is the authority for committed incarnation numbers within that session/stream.
 
@@ -74,7 +74,7 @@ Resume algorithm:
 4. Relocated paths and same-content inode replacement retain the incarnation when the covered prefix matches. Missing/unreadable sources, cancellation, incomplete verification and `stream_too_large` do not authorize a restart or unproven resume.
 5. Return a contiguous candidate range starting at resumed `to` (or zero for a new incarnation), together with SHA-256 of `[0, candidate to)`. The digest includes omitted bytes. Candidate assignment is not durable; retries derive identities from the recovered fold, not volatile counters. Failed/precommit work cannot consume an incarnation number or advance coverage.
 
-Prefix evidence is bound to the native event, so restart and uncertain acknowledgement use the recovered committed frame. Reader selection never writes coverage. The narrowly scoped native schema/spec/fixture amendment is an approved stage-2 dependency, not permission to implement before this issue is ready.
+Prefix evidence is bound to the native event, so restart and uncertain acknowledgement use the recovered committed frame. Reader selection never writes coverage. The narrowly scoped native schema/spec/fixture amendment is implemented as the authorized stage-2 dependency.
 
 **Frozen contract:** the completed manual prefix checks satisfy D6, so D1 is frozen. `/clear` creates a new session ID/file with independent coverage; no old-session incarnation is transferred. `/compact`, `--resume` and fork preserved prior bytes in the observed checks. This is scoped evidence, not a universal append-only guarantee: keep prefix verification and new-incarnation replay as guards against unobserved rewrites/truncation.
 
@@ -152,11 +152,11 @@ The private `Stop`/`SubagentStop` hook capture showed absolute paths and extra e
 
 Commit only reviewed structural findings and content-free manual outcomes, never source text, private paths/cwd/IDs, actual timestamps, raw prefix digests or hook stdin. Build invented synthetic fixtures from confirmed findings. Normal tests/CI never run the throwaway scan or manual checks and use no host transcripts, Claude installation, credentials or hooks. This task does not authorize this assistant to perform those checks or launch Claude sessions.
 
-No broad per-scenario probe workflow is required. Preserve evidence limits for unobserved variants, nested/parallel subagents or interruption behavior; the release Claude version floor remains a hooks-stage decision. D6 is satisfied, D1 is frozen and all user policy decisions for 003 are resolved. The approved final-review fixes are complete; only the user's explicit ready decision remains before implementation.
+No broad per-scenario probe workflow is required. Preserve evidence limits for unobserved variants, nested/parallel subagents or interruption behavior; the release Claude version floor remains a hooks-stage decision. D6 is satisfied, D1 is frozen and all user policy decisions for 003 are resolved. The approved final-review fixes are complete; the user authorized implementation, now awaiting review/acceptance.
 
 ## Acceptance criteria and planned evidence
 
-Unchecked until implementation; replace planned evidence with named tests/results before acceptance.
+Implementation evidence is below. Criteria remain unchecked pending user acceptance; no real Claude run or universal transcript-schema guarantee is claimed.
 
 - [ ] Contract and characterized locator/record shapes are reviewed; unverified behavior and investigated rewrites are identified honestly. Evidence: `docs/claude-transcripts.md` with versioned structural findings, manual `/compact`/`--resume` prefix comparisons and hook path-spelling outcomes, the approved attachment-record policy, and the user's ready decision.
 - [ ] Explicit parent/subagent locators select correct sources, including empty agent types, require absolute paths without tilde expansion, tolerate extra envelope fields and never discover transcripts. Missing subagent input is a normal no-op without errors, coverage or retries; healthy streams still progress. Evidence: parameterized fixtures with differing paths, `scratchpad_dir`/`prompt_id`/`effort`, absent subagent files with/without prior coverage, source/native byte invariance and UTF-8 agent-ID boundaries. Explicitly accept a 233-byte agent ID with `n = 9007199254740991` (256-byte input ID), reject a 234-byte agent ID with that `n` (257 bytes), and count multibyte IDs by UTF-8 bytes rather than characters.
@@ -172,6 +172,27 @@ Unchecked until implementation; replace planned evidence with named tests/result
 - [ ] Recall reports all five verification statuses with shared support budgets, returns no source content and preserves stored memories; list never opens sources. Evidence: exact-match, same-size mutation, truncation, missing/final-symlink/ancestor-symlink/non-regular/permission/concurrent-read and budget boundary packaged tests; source/native byte invariance.
 - [ ] `npm test`, `git diff --check` and `npm run check:dist` pass; clean runtime accompanies authorized behavior changes. Tests use synthetic transcripts/private temporary state, no Claude, credentials, host transcripts, hooks or workers.
 
+## Implemented interfaces and review evidence
+
+`claudiom.source/read-snapshot` takes an explicit locator, that session's recovered native fold and optional limits/cancellation callback; it returns fixed statuses and bounded frames. `select-context` is pure and returns selected context, exact citations, omission metadata and candidate coverage. `read-sources` shares budgets across up to 256 supplied streams, stops when its run budget is exhausted and opens at most one descriptor at a time. None writes source or native progress. Missing subagents return informational `missing_subagent` with no candidate coverage. Stage 3 owns generation and commits.
+
+Additional allocation/output guards: at most **4096 frames per run**, selected-context JSON at most **32 MiB / 8 Mi estimated tokens**, **16 KiB per text/tool excerpt** and at most eight nested tool-result block levels. Limits can be lowered; selected-byte budgets must fit the empty JSON array. Excerpts/unknown/deep blocks are explicitly marked, never silently represented as complete output. These guards stop before the next unprocessed record; they do not truncate committed coverage. Hash scans use 64 KiB buffers, discard oversized/unaffordable line fragments and validate the processed prefix again before returning a snapshot. Only known native filesystem-tool fields are resolved against record cwd; no file is opened from them.
+
+Named synthetic interface evidence in [source_test.cljs](../../test/cljs/claudiom/source_test.cljs):
+
+- `explicit-snapshot-and-native-restart`: exact ranges/digests, byte ordering, timestamps/cwd, UUID fragments, tails, relocation/same-content inode replacement and successive rewrite/truncation incarnations.
+- `omission-and-parsed-budget-interface`: oversized/malformed/unknown/BOM/duplicate-key omissions, parsed budgets and no payload leakage.
+- `user-attribution-combinations`: full parent/subagent, tool-result, meta, origin and SDK cross-product, with label/omission precedence and candidate progress.
+- `attachment-and-mixed-block-privacy`: queued-command guards without humanTurn, filename fallback, excluded payloads, hidden reasoning/images and separate assistant fragments.
+- `source-safety-cancellation-and-stream-boundaries`: absent subagent with prior coverage, final versus ancestor symlinks, unsafe/missing sources, cancellation, short reads, UTF-8 limits, exact 256/rejected 257 IDs and incarnation exhaustion.
+- `shared-stream-budget-and-mutation-evidence`: shared parsed budgets, append snapshots and injected in-place rewrite rejection.
+- `numerical-boundaries-paths-and-generated-restarts`: exact 1 MiB versus oversized lines, sparse over-256-MiB refusal, frame allocation guard, record-relative path resolution and 144 deterministic UTF-8/CRLF restart/replay/digest cases.
+- `citation-attempt-boundaries-and-list-no-source-io` and `bounded-read-only-citation-verification`: all five statuses, 1-MiB/16-MiB/256-attempt limits, shared support/failed-attempt budgets, unsafe paths, injected permission/read/concurrent-mutation failures and unchanged source bytes.
+
+[store_test.cljs](../../test/cljs/claudiom/store_test.cljs) adds `observation-prefix-is-atomic-and-required` and retains native restart/replay/uncertain-acknowledgement/failure coverage with amended fixtures. [cli.test.js](../../test/cli.test.js) verifies real packaged recall/support range hashing without source expansion, list's `not_checked`, missing-source resilience, native byte invariance and the exact tarball without compiler/JVM/credentials. Normal tests consult only synthetic sources/private state (native-only invented citations use a fake verifier).
+
+Validation: `npm test` and clean `npm run ci` pass 34 ClojureScript tests / 1598 assertions and 7 Node tests, warning-free builds, `check:dist` and `git diff --check`. Committed release output remains identical after a clean rebuild. Crash/fault tests are simulated boundaries, not power-loss evidence. Real Claude/provider/hooks/workers remain outside normal tests and this stage.
+
 ## Out of scope
 
-Providers, prompts, generation and authoritative coverage writes (apart from the approved native schema/spec/fixture dependency); cited-content expansion (stage 5); workers, queues, leases, installed hooks, plugin packaging, MCP, source restoration/writes, semantic search, cross-session synthesis, automatic prompt injection and release/version changes. Repository probe code/interfaces/PRs and their redaction/sentinel tests are also out of scope. All implementation requires the user to mark 003 ready. User merges without squash.
+Providers, prompts, generation and authoritative coverage writes (apart from the approved native schema/spec/fixture dependency); cited-content expansion (stage 5); workers, queues, leases, installed hooks, plugin packaging, MCP, source restoration/writes, semantic search, cross-session synthesis, automatic prompt injection and release/version changes. Repository probe code/interfaces/PRs and their redaction/sentinel tests are also out of scope. Stage-2 implementation was explicitly authorized; out-of-scope stages remain unauthorized. User merges without squash.
