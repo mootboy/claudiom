@@ -1,13 +1,35 @@
 (ns claudiom.store
   (:require [cljs.spec.alpha :as s]
             [clojure.string :as str]
-            [clojure.set :as set]
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:crypto" :as crypto]))
 
 (defn fail [] (throw (js/Error. "Unsafe, invalid or corrupt native storage.")))
-(defn identifier? [x] (and (string? x) (pos? (count x)) (<= (js/Buffer.byteLength x) 256)))
+(defn identifier? [x]
+  (and (string? x) (pos? (count x)) (<= (js/Buffer.byteLength x) 256)
+       ;; Reject unpaired surrogates: UTF-8 replacement would alias identities.
+       (try (= x (js/decodeURIComponent (js/encodeURIComponent x))) (catch :default _ false))))
+
+(defn urn-component [x]
+  (when-not (identifier? x) (fail))
+  (str/replace (js/encodeURIComponent x) #"[!'()*]"
+               #(str "%" (.toUpperCase (.toString (.charCodeAt % 0) 16)))))
+
+(defn memory-urn [session id]
+  (str "urn:claudiom:" (urn-component session) ":" (urn-component id)))
+
+(defn recall-identity [id session]
+  (when (and session (not (identifier? session))) (fail))
+  (if (and (string? id) (str/starts-with? id "urn:claudiom:"))
+    (do
+      (when (> (count id) 1550) (fail))
+      (let [parts (str/split id #":" -1)]
+        (when-not (= 4 (count parts)) (fail))
+        (let [owner (js/decodeURIComponent (nth parts 2)) local (js/decodeURIComponent (nth parts 3))]
+          (when (or (not= id (memory-urn owner local)) (and session (not= owner session))) (fail))
+          [owner local])))
+    (if (and session (identifier? id)) [session id] (fail))))
 (s/def ::version #{1})
 (s/def ::event_id identifier?)
 (s/def ::session_id identifier?)
@@ -197,7 +219,13 @@
       (if (= "ENOENT" (.-code e)) {:events [] :state (fold-events []) :end 0 :size 0 :repair_needed false}
           (fail)))))
 
-(declare read-states validate-global!)
+(defn session-entries []
+  (let [r (root)]
+    (ensure-path! r false)
+    (let [entries (if (fs/existsSync r) (vec (sort (array-seq (fs/readdirSync r)))) [])]
+      (when (or (> (count entries) 256)
+                (not-every? #(re-matches #"[0-9a-f]{64}" %) entries)) (fail))
+      entries)))
 
 (defn sync! [fd] (fs/fsyncSync fd))
 (defn write-chunk! [fd bytes offset position]
@@ -213,11 +241,10 @@
         bytes (js/Buffer.from (str (js/JSON.stringify (clj->js event)) "\n"))]
     (when (or (> (.-length bytes) 1048576)
               (> (+ end (if replay? 0 (.-length bytes))) 16777216)) (fail))
-    ;; ponytail: global identity checks read up to 256 × 16 MiB per commit.
-    ;; Upgrade with a disposable ID index under XDG state, verified against logs.
-    (let [states (read-states nil)]
-      (when (and (>= (count states) 256) (not (fs/existsSync (path/dirname p)))) (fail))
-      (validate-global! (conj (vec (remove #(= (:session_id event) (:session %)) states)) next-state)))
+    ;; Only names are needed for the store-wide cap; never open unrelated logs.
+    (let [entries (session-entries)]
+      (when (and (>= (count entries) 256)
+                 (not (some #{(path/basename (path/dirname p))} entries))) (fail)))
     (ensure-path! (path/dirname p) true)
     (let [prior (when (fs/existsSync p) (check-entry! p true false))
           fd (fs/openSync p (bit-or (.-O_RDWR fs/constants) (.-O_CREAT fs/constants)
@@ -262,9 +289,7 @@
   ([session partial?]
    (let [r (root)
          _ (ensure-path! r false)
-         entries (if session [(path/basename (path/dirname (log-path session)))]
-                     (if (fs/existsSync r) (sort (array-seq (fs/readdirSync r))) []))]
-     (when (> (count entries) 256) (fail))
+         entries (if session [(path/basename (path/dirname (log-path session)))] (session-entries))]
      (reduce
       (fn [states entry]
         (when-not (re-matches #"[0-9a-f]{64}" entry) (fail))
@@ -281,12 +306,6 @@
               (fail)))))
       (with-meta [] {:warnings []}) entries))))
 
-(defn validate-global! [states]
-  (reduce (fn [seen state]
-            (reduce (fn [ids id]
-                      (when (contains? ids id) (fail))
-                      (conj ids id)) seen (keys (:definitions state)))) #{} states))
-
 (defn lifecycle [state m]
   (cond
     (contains? (:superseded state) (:id m)) "superseded"
@@ -295,20 +314,17 @@
     :else "active"))
 
 (defn present [state m]
-  (cond-> (assoc m :status (lifecycle state m))
-    (:citations m) (update :citations #(mapv (fn [c] (assoc c :source_status "not_checked")) %))
-    (get-in state [:superseded (:id m)]) (assoc :supersession (get-in state [:superseded (:id m)]))))
+  (let [qualify #(memory-urn (:session_id m) %)]
+    (cond-> (assoc m :id (qualify (:id m)) :local_id (:id m) :status (lifecycle state m))
+      (:citations m) (update :citations #(mapv (fn [c] (assoc c :source_status "not_checked")) %))
+      (:supports m) (update :supports #(mapv qualify %))
+      (get-in state [:superseded (:id m)])
+      (assoc :supersession (update (get-in state [:superseded (:id m)]) :replacement_id qualify)))))
 
 (defn retrieve [command id session]
-  (when (and (= command "recall") (not (identifier? id))) (fail))
-  (let [states (read-states session true)
-        owners (reduce (fn [owners state]
-                         (reduce #(update %1 %2 (fnil conj #{}) (:session_hash state))
-                                 owners (keys (:definitions state)))) {} states)
-        conflicting (apply set/union #{} (filter #(> (count %) 1) (vals owners)))
-        healthy (remove #(contains? conflicting (:session_hash %)) states)
-        warnings (into (:warnings (meta states))
-                       (map #(hash-map :kind "conflict" :session_hash %) (sort conflicting)))
+  (let [[session id] (if (= command "recall") (recall-identity id session) [session id])
+        healthy (read-states session true)
+        warnings (:warnings (meta healthy))
         result (if (= command "list")
                  (->> healthy
                       (mapcat (fn [state] (for [m (vals (:definitions state)) :when (= "active" (lifecycle state m))]
@@ -319,7 +335,7 @@
                            (cond-> (present state m)
                              (:supports m) (assoc :supporting_observations
                                                   (mapv #(present state (get-in state [:definitions %])) (:supports m)))))) healthy))]
-    {:result result :warnings warnings :incomplete (boolean (some #(contains? #{"corrupt" "conflict"} (:kind %)) warnings))}))
+    {:result result :warnings warnings :incomplete (boolean (some #(= "corrupt" (:kind %)) warnings))}))
 
 (defn list-memories [session] (:result (retrieve "list" nil session)))
 (defn recall [id session] (:result (retrieve "recall" id session)))

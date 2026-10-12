@@ -41,6 +41,6 @@
       "status" (print-json (status version))
       ("list" "recall") (reader-command command args)
       "repair" (repair-command args)
-      ("--help" "-h" nil) (js/console.log "Usage: claudiom status | list [--session <id>] | recall <id> [--session <id>] | repair --session <id> | --help\nGeneration disabled. Retrieval is read-only; no model calls or hooks.")
+      ("--help" "-h" nil) (js/console.log "Usage: claudiom status | list [--session <id>] | recall <urn> | recall <local-id> --session <id> | repair --session <id> | --help\nGeneration disabled. Retrieval is read-only; no model calls or hooks.")
       (do (js/console.error "Unknown command. Use claudiom --help.")
           (set! (.-exitCode js/process) 1)))))

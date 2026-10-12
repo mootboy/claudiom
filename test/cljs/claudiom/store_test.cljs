@@ -99,16 +99,18 @@
                                       :source_time nil :supports ["observation-1"]}]))
      (is (= 2 (count (store/list-memories nil))))
      (store/append! (lifecycle-event "drop-1" "drop" {:memory_id "observation-1"}))
-     (is (= ["reflection-1"] (mapv :id (store/list-memories nil))))
-     (is (= "dropped" (:status (first (:supporting_observations (store/recall "reflection-1" nil))))))
-     (is (= "not_checked" (:source_status (first (:citations (store/recall "observation-1" nil))))))
+     (is (= ["reflection-1"] (mapv :local_id (store/list-memories nil))))
+     (is (= "dropped" (:status (first (:supporting_observations (store/recall "reflection-1" "synthetic"))))))
+     (is (= "not_checked" (:source_status (first (:citations (store/recall "observation-1" "synthetic"))))))
      (store/append! (assoc event :event_id "correction-definition"
                           :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}
                           :memories [(assoc observation :id "observation-2" :text "Corrected synthetic decision.")]))
      (store/append! (lifecycle-event "correction" "supersede"
                                     {:memory_id "observation-1" :replacement_id "observation-2" :reason "Synthetic correction."}))
-     (is (= "support_changed" (:status (store/recall "reflection-1" nil))))
-     (is (= ["observation-2"] (mapv :id (store/list-memories nil))))
+     (is (= "support_changed" (:status (store/recall "reflection-1" "synthetic"))))
+     (is (= "urn:claudiom:synthetic:observation-2"
+            (get-in (store/recall "observation-1" "synthetic") [:supersession :replacement_id])))
+     (is (= ["observation-2"] (mapv :local_id (store/list-memories nil))))
      (is (thrown? js/Error (store/append! (lifecycle-event "cycle" "supersede"
                                          {:memory_id "observation-2" :replacement_id "observation-1" :reason "Cycle."})))))))
 
@@ -116,10 +118,10 @@
   (private-state
    (fn [_]
      (store/append! (lifecycle-event "early-drop" "drop" {:memory_id "observation-1"}))
-     (is (nil? (store/recall "observation-1" nil)))
+     (is (nil? (store/recall "observation-1" "synthetic")))
      (store/append! (assoc event :memories [observation]))
      (is (= [] (store/list-memories nil)))
-     (is (= "dropped" (:status (store/recall "observation-1" nil))))
+     (is (= "dropped" (:status (store/recall "observation-1" "synthetic"))))
      (let [p (store/log-path "synthetic") before (fs/readFileSync p "utf8")]
        (is (thrown? js/Error
                     (store/append! (assoc event :event_id "invalid-reflection"
@@ -177,12 +179,40 @@
      (store/append! event)
      (is (= 1 (count (:events (store/read-log (store/log-path "synthetic")))))))))
 
-(deftest cross-session-memory-identity-conflicts
+(deftest session-qualified-memory-identities
   (private-state
    (fn [_]
-     (store/append! (assoc event :memories [observation]))
-     (is (thrown? js/Error (store/append! (assoc event :session_id "other" :memories [observation]))))
-     (is (= ["observation-1"] (mapv :id (store/list-memories nil)))))))
+     (doseq [session ["synthetic" "other" "session:/% é"]]
+       (store/append! (assoc event :session_id session :memories [observation]))
+       (let [urn (store/memory-urn session "observation-1")]
+         (is (= urn (:id (store/recall urn nil))))
+         (is (= session (:session_id (store/recall urn nil))))))
+     (is (= 3 (count (set (map :id (store/list-memories nil))))))
+     (is (thrown? js/Error (store/recall "observation-1" nil)))
+     (is (thrown? js/Error (store/recall (store/memory-urn "synthetic" "observation-1") "other")))
+     (is (= "observation-1" (:local_id (store/recall "observation-1" "synthetic"))))
+     (is (thrown? js/Error (store/append! (assoc event :event_id "conflicting-definition"
+                                               :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}
+                                               :memories [(assoc observation :text "Conflicting.")])))))))
+
+(deftest urn-encoding-and-validation
+  (private-state
+   (fn [_]
+     (let [session "session:/% é" id "memory:/% !'()*~ é"
+           urn (store/memory-urn session id)]
+       (store/append! (assoc event :session_id session :memories [(assoc observation :id id)]))
+       (is (= "urn:claudiom:session%3A%2F%25%20%C3%A9:memory%3A%2F%25%20%21%27%28%29%2A~%20%C3%A9" urn))
+       (is (= id (:local_id (store/recall urn nil))))
+       (doseq [bad ["urn:claudiom::x" "urn:claudiom:s:" "urn:claudiom:s:x:y"
+                    "urn:claudiom:s:%" "urn:claudiom:s:%FF" "urn:claudiom:s:%78"
+                    "urn:claudiom:s:%2f" "urn:claudiom:s:x?query" "urn:claudiom:s:x#fragment"
+                    "urn:other:s:x" (str "urn:claudiom:s:" (apply str (repeat 1600 "x")))]]
+         (is (thrown? js/Error (store/recall bad nil)))))
+     (let [session (apply str (repeat 128 "é")) id (apply str (repeat 256 ":"))
+           urn (store/memory-urn session id)]
+       (store/append! (assoc event :session_id session :memories [(assoc observation :id id)]))
+       (is (= 1550 (count urn)))
+       (is (= id (:local_id (store/recall urn nil))))))))
 
 (deftest timestamps-must-not-normalize-invalid-dates
   (doseq [timestamp ["2026-02-30T12:00:00Z" "2026-10-12T24:00:00Z" "2026-13-12T12:00:00Z"]]
@@ -224,7 +254,7 @@
          (is (not (fs/existsSync (store/root))))
          (store/append! (assoc event :memories [accepted]))
          (is (= (:citations accepted)
-                (mapv #(dissoc % :source_status) (:citations (store/recall (:id accepted) nil)))))))))
+                (mapv #(dissoc % :source_status) (:citations (store/recall (:id accepted) "synthetic")))))))))
   (doseq [n [256 257]]
     (private-state
      (fn [_]
@@ -310,7 +340,7 @@
        (is (thrown? js/Error (store/append! (assoc event :memories [(assoc observation :citations [citation])])))))
      (is (not (fs/existsSync (store/root))))
      (store/append! (assoc event :memories [observation]))
-     (is (= 1 (:citation_version (first (:citations (store/recall "observation-1" nil)))))))))
+     (is (= 1 (:citation_version (first (:citations (store/recall "observation-1" "synthetic")))))))))
 
 (deftest complete-json-without-lf-is-uncommitted
   (private-state
@@ -327,31 +357,28 @@
        (store/append! next)
        (is (= 200 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))))))
 
-(deftest partial-retrieval-quarantines-conflicts-but-writer-stays-strict
+(deftest corrupt-session-does-not-block-unrelated-commits-or-recall
   (private-state
    (fn [_]
      (store/append! (assoc event :memories [observation]))
-     (let [other (store/log-path "duplicate")]
-       (store/ensure-path! (path/dirname other) true)
-       (fs/writeFileSync other (str (js/JSON.stringify (clj->js (assoc event :session_id "duplicate" :memories [observation]))) "\n") #js {:mode 384}))
-     (let [healthy (store/log-path "healthy")]
-       (store/ensure-path! (path/dirname healthy) true)
-       (fs/writeFileSync healthy (str (js/JSON.stringify (clj->js (assoc event :session_id "healthy"
-                                                                 :memories [(assoc observation :id "healthy-observation")]))) "\n") #js {:mode 384}))
+     (store/append! (assoc event :session_id "damaged" :memories [observation]))
+     (fs/writeFileSync (store/log-path "damaged") "private corrupt content\n")
+     (let [original store/read-log reads (atom [])]
+       (with-redefs [store/read-log (fn [p] (swap! reads conj p) (original p))]
+         (store/append! (assoc event :event_id "next"
+                              :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})))
+       (is (= [(store/log-path "synthetic")] @reads)))
+     (store/append! (assoc event :session_id "new-session" :memories [observation]))
+     (is (thrown? js/Error (store/append! (assoc event :session_id "damaged"))))
+     (is (thrown? js/Error (store/repair! "damaged")))
      (let [{:keys [result warnings incomplete]} (store/retrieve "list" nil nil)]
        (is incomplete)
-       (is (= ["healthy-observation"] (mapv :id result)))
-       (is (= ["conflict" "conflict"] (mapv :kind warnings)))
-       (is (= #{(path/basename (path/dirname (store/log-path "synthetic")))
-                (path/basename (path/dirname (store/log-path "duplicate")))}
-              (set (map :session_hash warnings)))))
-     (is (nil? (:result (store/retrieve "recall" "observation-1" nil))))
-     (is (thrown? js/Error (store/append! (assoc event :event_id "next"
-                                               :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}))))
-     (fs/writeFileSync (store/log-path "duplicate") "private corrupt content\n")
-     (let [before (fs/readFileSync (store/log-path "synthetic") "utf8")]
-       (is (thrown? js/Error (store/append! event)))
-       (is (= before (fs/readFileSync (store/log-path "synthetic") "utf8")))))))
+       (is (= 2 (count result)))
+       (is (= ["corrupt"] (mapv :kind warnings))))
+     (let [{:keys [result warnings incomplete]} (store/retrieve "recall" (store/memory-urn "synthetic" "observation-1") nil)]
+       (is (= "synthetic" (:session_id result)))
+       (is (empty? warnings))
+       (is (not incomplete))))))
 
 (deftest repair-retry-syncs-after-uncertain-truncation
   (private-state

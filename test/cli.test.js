@@ -53,11 +53,15 @@ test("packaged reader retrieves synthetic native memories across processes", () 
   const cli = path.join(repository, "cli.js");
   try {
     const { session, dir } = installSyntheticFixture(root);
-    assert.equal(JSON.parse(invoke(cli, ["list"], root, env))[0].id, "observation-1");
-    const recalled = JSON.parse(invoke(cli, ["recall", "observation-1", "--session", session], root, env));
+    assert.equal(JSON.parse(invoke(cli, ["list"], root, env))[0].id, "urn:claudiom:synthetic:observation-1");
+    const recalled = JSON.parse(invoke(cli, ["recall", "urn:claudiom:synthetic:observation-1", "--session", session], root, env));
     assert.equal(recalled.text, "Synthetic decision.");
     assert.equal(recalled.citations[0].source_status, "not_checked");
-    assert.equal(spawnSync(process.execPath, [cli, "recall", "missing"], { cwd: root, env }).status, 1);
+    assert.equal(recalled.local_id, "observation-1");
+    assert.equal(JSON.parse(invoke(cli, ["recall", "observation-1", "--session", session], root, env)).id, recalled.id);
+    assert.equal(spawnSync(process.execPath, [cli, "recall", "observation-1"], { cwd: root, env }).status, 2);
+    assert.equal(spawnSync(process.execPath, [cli, "recall", recalled.id, "--session", "other"], { cwd: root, env }).status, 2);
+    assert.equal(spawnSync(process.execPath, [cli, "recall", "urn:claudiom:synthetic:missing"], { cwd: root, env }).status, 1);
     assert.equal(spawnSync(process.execPath, [cli, "list", "--bad"], { cwd: root, env }).status, 2);
     writeFileSync(path.join(dir, "events.jsonl"), "private-invalid-content\n");
     const bad = spawnSync(process.execPath, [cli, "list"], { cwd: root, env, encoding: "utf8" });
@@ -70,11 +74,11 @@ test("packaged reader retrieves synthetic native memories across processes", () 
     assert.equal(partial.status, 0);
     assert.equal(JSON.parse(partial.stdout)[0].session_id, "healthy");
     assert.ok(partial.stderr.includes(path.basename(dir)));
-    const healthy = spawnSync(process.execPath, [cli, "recall", "reflection-1"], { cwd: root, env, encoding: "utf8" });
+    const healthy = spawnSync(process.execPath, [cli, "recall", "urn:claudiom:healthy:reflection-1"], { cwd: root, env, encoding: "utf8" });
     assert.equal(healthy.status, 0);
     assert.equal(JSON.parse(healthy.stdout).session_id, "healthy");
-    assert.ok(healthy.stderr.includes(path.basename(dir)));
-    const unavailable = spawnSync(process.execPath, [cli, "recall", "missing"], { cwd: root, env, encoding: "utf8" });
+    assert.equal(healthy.stderr, "");
+    const unavailable = spawnSync(process.execPath, [cli, "recall", "urn:claudiom:synthetic:missing"], { cwd: root, env, encoding: "utf8" });
     assert.equal(unavailable.status, 2);
     assert.match(unavailable.stderr, /Memory unavailable; results incomplete/);
     assert.equal(spawnSync(process.execPath, [cli, "repair", "--session", session], { cwd: root, env }).status, 2);
@@ -93,13 +97,19 @@ test("readers warn about tails without writes; explicit repair is separate", () 
     const clean = readFileSync(log, "utf8");
     const tail = '{"unfinished":';
     appendFileSync(log, tail);
-    for (const args of [["list"], ["recall", "reflection-1"], ["list", "--session", session]]) {
+    for (const args of [["list"], ["recall", "urn:claudiom:synthetic:reflection-1"], ["list", "--session", session]]) {
       const result = spawnSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: "utf8" });
       assert.equal(result.status, 0);
       assert.match(result.stderr, new RegExp(`Repair needed for session ${path.basename(dir)}; results incomplete`));
       assert.equal(readFileSync(log, "utf8"), clean + tail);
       JSON.parse(result.stdout);
     }
+    const missing = spawnSync(process.execPath, [cli, "recall", "urn:claudiom:synthetic:missing"],
+      { cwd: root, env, encoding: "utf8" });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /Repair needed for session/);
+    assert.match(missing.stderr, /Memory not found\./);
+    assert.equal(readFileSync(log, "utf8"), clean + tail);
     assert.deepEqual(JSON.parse(invoke(cli, ["repair", "--session", session], root, env)),
       { repaired: true, removed_bytes: Buffer.byteLength(tail) });
     assert.equal(readFileSync(log, "utf8"), clean);
@@ -127,10 +137,12 @@ test("an unrelated torn tail does not make a missing memory unavailable", () => 
     event.memories = [];
     const bytes = JSON.stringify(event) + '\n{"unfinished":';
     writeFileSync(log, bytes);
-    const missing = spawnSync(process.execPath, [cli, "recall", "missing"], { cwd: root, env, encoding: "utf8" });
+    const missing = spawnSync(process.execPath, [cli, "recall", "urn:claudiom:synthetic:missing"], { cwd: root, env, encoding: "utf8" });
     assert.equal(missing.status, 1);
     assert.equal(missing.stdout, "");
-    assert.match(missing.stderr, new RegExp(`Repair needed for session ${path.basename(dir)}; results incomplete`));
+    assert.equal(missing.stderr, "Memory not found.\n");
+    const listed = spawnSync(process.execPath, [cli, "list"], { cwd: root, env, encoding: "utf8" });
+    assert.match(listed.stderr, new RegExp(`Repair needed for session ${path.basename(dir)}; results incomplete`));
     assert.match(missing.stderr, /Memory not found\./);
     assert.ok(!missing.stderr.includes("Memory unavailable"));
     assert.equal(readFileSync(log, "utf8"), bytes);
@@ -158,11 +170,13 @@ test("exact tarball runs without compiler, JVM or model credentials", () => {
     const { dir } = installSyntheticFixture(root);
     const before = readFileSync(path.join(dir, "events.jsonl"), "utf8");
     assert.deepEqual(JSON.parse(invoke(cli, ["list"], consumer, env)).map(memory => memory.id),
-      ["observation-1", "reflection-1"]);
-    const recalled = JSON.parse(invoke(cli, ["recall", "reflection-1"], consumer, env));
+      ["urn:claudiom:synthetic:observation-1", "urn:claudiom:synthetic:reflection-1"]);
+    const recalled = JSON.parse(invoke(cli, ["recall", "urn:claudiom:synthetic:reflection-1"], consumer, env));
     assert.equal(recalled.supporting_observations[0].text, "Synthetic decision.");
+    assert.deepEqual(recalled.supports, ["urn:claudiom:synthetic:observation-1"]);
+    assert.equal(recalled.supporting_observations[0].id, recalled.supports[0]);
     assert.equal(recalled.supporting_observations[0].citations[0].source_status, "not_checked");
-    assert.deepEqual(JSON.parse(invoke(cli, ["recall", "reflection-1"], consumer, env)), recalled);
+    assert.deepEqual(JSON.parse(invoke(cli, ["recall", "urn:claudiom:synthetic:reflection-1"], consumer, env)), recalled);
     assert.equal(readFileSync(path.join(dir, "events.jsonl"), "utf8"), before);
     assert.ok(packed.files.some(file => file.path === "dist/claudiom.js"));
     assert.ok(packed.files.some(file => file.path === "LICENSE"));

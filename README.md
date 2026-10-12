@@ -29,10 +29,11 @@ See [architecture](docs/architecture.md), [release plan](docs/plan-0.1.0.md) and
 
 ```sh
 node cli.js list [--session <id>]
-node cli.js recall <id> [--session <id>]
+node cli.js recall 'urn:claudiom:<encoded-session>:<encoded-memory>'
+node cli.js recall <local-id> --session <id>
 ```
 
-These commands return JSON from private native logs under XDG data storage. They never call models, create storage or modify transcripts. Corrupt sessions are skipped with identifying session-hash warnings on stderr; incomplete tails also produce repair-needed warnings. Results may be incomplete. Citations are returned without source expansion (`source_status: "not_checked"`).
+These commands return JSON from private native logs under XDG data storage. Public memory IDs are session-qualified URNs; recall reads only the addressed session. They never call models, create storage or modify transcripts. Corrupt sessions are skipped with identifying session-hash warnings on stderr; incomplete tails also produce repair-needed warnings. Results may be incomplete. Citations are returned without source expansion (`source_status: "not_checked"`).
 
 Use `node cli.js repair --session <id>` explicitly to truncate an incomplete native-log tail; writers refuse to append until it is repaired. Repair never modifies Claude transcripts. No generation/commit command exists yet. See the [native persistence contract](docs/native-persistence.md) for format, limits and single-writer requirements.
 
