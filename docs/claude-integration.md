@@ -21,7 +21,7 @@ plugin/<committed runtime>.mjs
 
 All manifest paths resolve inside the plugin and start with `./`. Resolve `${CLAUDE_PLUGIN_ROOT}` at invocation: it is version-specific and must not be stored in registry/leases/handles/memories. `${CLAUDE_PLUGIN_DATA}` is operational plugin data, not authoritative memory storage; it normally disappears on uninstall. Use private XDG roots for authoritative logs and registry state.
 
-Development uses `claude --plugin-dir ./plugin`; installed acceptance uses marketplace add/install plus `claude plugin validate --strict`, exact cache/runtime smoke tests and Node >=22.19.0 checks. These are opt-in Claude checks, never ordinary tests. Treat 2.1.296 as the characterized baseline, not proof older versions work; freeze/document the supported floor in 007.
+Development uses claude --plugin-dir ./plugin; opt-in installed checks use marketplace/cache validation, strict plugin validation and runtime-only smoke tests. Planned floor is Claude Code **2.1.296**, Node >=22.19.0; older versions are unsupported, newer versions require scoped acceptance evidence rather than universal guarantees.
 
 ## Hook registration and event projection — issue 004
 
@@ -34,23 +34,23 @@ Use one stdin-validating command hook script for SessionStart, Stop, SubagentSto
 | SubagentStop | Use agent_transcript_path, not the parent path; register eligible subagent only. Ignore `agent_type: claudiom:memory-writer` entirely. Missing/empty internal events without a usable source are no-ops. |
 | SessionEnd | Registration only, within the shared roughly 1.5s budget; no flush or generation promise. |
 
-Only SubagentStop builds a subagent locator; stripping incidental agent fields on parent events keeps the accepted source spec unchanged. Session registry keys are explicit session IDs. Unknown envelope fields cannot authorize discovery or mutate producer policy. The fresh hook ID is required after `/clear`.
+Only SubagentStop builds subagent locators; parent events strip incidental agent fields. Per-session XDG-state registry files are atomically updated under the store lock (Stop/SubagentStop were observed about one second apart). Fresh session ID after /clear. SessionStart captures CLAUDE_CODE_ENTRYPOINT, retained by other hooks; unknown stdin fields cannot authorize discovery.
 
 ## Stop nudge and /claudiom:remember — issue 005
 
 Stop must not read transcript bytes: registry + native fold + stat only. It may emit JSON `decision: "block"` with a fixed reason roughly **"Claudiom: uncovered progress; run /claudiom:remember"** only when:
 
-- summed uncovered parent/registered-subagent progress reaches configurable threshold (default 40 KB ≈ 10K estimated tokens);
-- `stop_hook_active` is false;
-- session is not classified as headless `sdk-cli` (observed field, configurable);
-- no active range lease;
-- session nudge backoff permits it (default one per 15 minutes until a lease or commit appears).
+- summed uncovered progress reaches configurable threshold (default **40,000 bytes ≈ 10K tokens**);
+- stop_hook_active is false;
+- SessionStart's recorded CLAUDE_CODE_ENTRYPOINT is **not exactly sdk-cli** (other/empty/absent values allow nudges);
+- no active lease in shared XDG state;
+- shared per-session backoff permits it (default 15 minutes, reset by a new lease or durable commit).
 
 Exit 0 for a nudge; **never exit 2**. Any error returns exit 0/empty stdout. Set Stop timeout to 5 seconds. Do not put delegation instructions in hook reason: they live only in the remember skill. A blocked/ignored nudge is best-effort, not a reason to repeat every turn.
 
 The skill supplies `${CLAUDE_SESSION_ID}` explicitly to background `claudiom:memory-writer`; it loops `next_context(session_id)`/`record` for observations, then reflection work in 006. No path arguments or session discovery. Manual remember works even when headless nudges are disabled. SessionEnd does not launch it. No standing SessionStart instruction.
 
-Headless signal plumbing must be frozen in 004 without reading transcripts in Stop. Do not infer `sdk-cli` merely from undocumented `CLAUDE_CODE_ENTRYPOINT` values; the spike observed `cli`, not a proven universal mapping. Unknown/error trigger state must fail open without blocking the user.
+SessionStart records env CLAUDE_CODE_ENTRYPOINT without transcript reads. Exactly sdk-cli means no nudge; every other/empty/absent value permits one under other gates, **not fail closed**. Issue 005 real use must confirm claude -p => sdk-cli; this has not yet been verified. Genuine registry/fold/stat errors still return silent exit 0; absent env is not such an error.
 
 ## Writer and producer MCP
 
@@ -58,7 +58,7 @@ Agent frontmatter for 0.1.0 is literal `model: haiku`. Plugin `userConfig`/`CLAU
 
 Expose stdio MCP server `claudiom` within the plugin. Confirmed tool prefix is `mcp__plugin_claudiom_claudiom__`; writer tools allowlist names **only** `next_context` and `record`. The spike observed these two tools plus built-in `SubagentHandback`; no general filesystem or other MCP tools should be available. A foreground/disallowedTools fallback was contemplated if the allowlist failed, but the spike confirmed restriction for the background agent. Do not silently change delegation mode.
 
-`next_context` uses the fresh explicit session ID and registry, returning one bounded stream and an opaque expiring server-side handle. It reads parent plus all eligible registered subagents, excluding the writer itself. Roughly five-minute leases discourage concurrent duplicate work. `record` accepts proposed memories/reference indices and an empty reason, then validates handle/range/prefix/membership/native invariants under the store-wide lock and commits atomically. Never expose drop/supersede tools; real citations cannot prove truthful interpretation.
+next_context uses explicit session and registry, one bounded stream/opaque handle; parent plus eligible subagents, excluding writer. Shared XDG-state lease **5 minutes**, handle expiry same, handles memory-only/restart-expired. record validates membership/range/prefix/native invariants under lock and commits all-or-nothing. Lock wait **2 seconds**, stale **30 seconds**, ownership token only prevents releasing a replaced lock. Paused-owner overlap/session corruption is accepted for single-user 0.1.0, not strict exclusion. Registry retention **30 days**; concrete limits in 004/005. No drop/supersede; authentic citations are not truth.
 
 The MCP server receives `CLAUDE_PROJECT_DIR` and maps it through the registry. Never rely on its `CLAUDE_CODE_SESSION_ID`: it went stale after `/clear` in the spike. Plugin env substitution for `${user_config.*}` worked for the MCP server only; the model configuration path is still deferred.
 
@@ -69,7 +69,7 @@ Setup discloses in-session/background Haiku work, best-effort lifetime and possi
 - `mcp__plugin_claudiom_claudiom__next_context`
 - `mcp__plugin_claudiom_claudiom__record`
 
-Freeze exact Claude settings syntax against the supported version; no wildcard MCP allow rule. The agent's tools allowlist remains narrow even when read tools are added. MCP list/recall are separate read-only capabilities, never generation or automatic prompt injection. Preserve stage-2 bounded verification and source-status reporting; cited-content expansion is not silently authorized by adding MCP.
+Setup prints a permissions.allow snippet with exactly the two full producer tool names above, never wildcard MCP permission or silent settings edits. Agent allowlist remains narrow when read tools are added. MCP list/recall are read-only, no generation/automatic prompt injection; keep stage-2 verification without adding source-content expansion.
 
 ## Scoped spike findings and supersessions
 
