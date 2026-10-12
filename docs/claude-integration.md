@@ -55,13 +55,15 @@ Event specifics:
 | `SubagentStop` | `agent_id`, `agent_type`, `agent_transcript_path` | `transcript_path` is still the parent's. `agent_transcript_path` is the documented subagent locator. Some internal agents fire this event with an empty `agent_type`; decide explicitly whether to skip them. |
 | `SessionEnd` | `reason`: `clear` \| `resume` \| `logout` \| `prompt_input_exit` \| `other` | All hooks share a default budget of about 1.5s. Plugin hook `timeout` values do not raise it. Enqueue only; the worker does any flush. |
 
+Stage-4 locator projection: build a subagent locator only for `SubagentStop`, using `agent_transcript_path`. Other events build parent locators even if their stdin includes `agent_id`/`agent_type`; do not forward those fields into a parent locator. Keep the source locator spec unchanged.
+
 ## Transcripts
 
 The docs publish no schema for transcript lines. They document only the locations: the parent `transcript_path` and `<session>/subagents/agent-<agentId>.jsonl` via `agent_transcript_path`.
 
 - Treat transcripts as read-only, and treat every line field as unstable. Parse defensively, and report records that cannot be parsed instead of failing the stream.
 - The [one-off structural scan and user-run manual checks](claude-transcripts.md) supply stage-2 evidence; no repository transcript probe is planned. `/clear` creates a new session/file; observed `/compact`, `--resume` and fork preserved prior bytes. These are scoped local observations, not universal documented behavior. Do not commit captured transcripts as fixtures.
-- **Implemented stage-2 contract, awaiting acceptance:** hook paths are absolute, with no tilde expansion; tolerate extra stdin fields such as `scratchpad_dir`, `prompt_id` and `effort`. Read explicitly supplied subagents regardless of empty `agent_type`, but a missing subagent source is a normal no-op with no error, coverage or retry loop. Stage 4 separately decides enqueue eligibility.
+- **Implemented and user-accepted stage-2 contract:** hook paths are absolute, with no tilde expansion; tolerate extra stdin fields such as `scratchpad_dir`, `prompt_id` and `effort`. Read explicitly supplied subagents regardless of empty `agent_type`, but a missing subagent source is a normal no-op with no error, coverage or retry loop. Stage 4 separately decides enqueue eligibility.
 - **Approved native locator contract:** paths are resolution hints; exact byte ranges/digests remain mandatory with or without UUIDs. File identity and size alone do not detect middle-prefix rewrites. Resume requires re-hashing the committed prefix; mismatch/truncation selects a fold-derived new incarnation and replay from zero, as frozen in [003](issues/003-claude-source-reader-and-context-selection.md) and the [native contract](native-persistence.md). Attachment records use 003's approved allowlist, never blanket inclusion of injected context.
 
 ## MCP recall

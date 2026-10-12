@@ -36,7 +36,7 @@ Build the smallest private-file writer/fold plus `list` and `recall <id>` CLI. U
 
 ### 2. Claude source reader and context selection
 
-Read explicitly provided parent/subagent locators, preserve source/citation provenance and detect mutations/partial appends. The throwaway structural scan and user-run manual checks are recorded in [Claude transcript findings](claude-transcripts.md); no repository probe slice is needed. D1 prefix/incarnation rules are frozen, hook paths are absolute, missing subagent sources are no-ops, and attachment records follow the user-approved allowlist in [003](issues/003-claude-source-reader-and-context-selection.md). Select only bounded relevant content and verify recalled citations read-only; never ship private transcripts as fixtures. The user marked 003 ready and authorized implementation; the source/selection/verification slice is now ready for review/acceptance.
+Read explicitly provided parent/subagent locators, preserve source/citation provenance and detect mutations/partial appends. The throwaway structural scan and user-run manual checks are recorded in [Claude transcript findings](claude-transcripts.md); no repository probe slice is needed. D1 prefix/incarnation rules are frozen, hook paths are absolute, missing subagent sources are no-ops, and attachment records follow the user-approved allowlist in [003](issues/003-claude-source-reader-and-context-selection.md). Select only bounded relevant content and verify recalled citations read-only; never ship private transcripts as fixtures. The user marked 003 ready and authorized implementation; the source/selection/verification slice is now accepted after implementation re-review.
 
 ### 3. Bounded observation generation tracer bullet
 
@@ -46,7 +46,7 @@ A manual `generate --transcript <path>` vertical slice must commit observations 
 
 ### 4. Non-blocking hooks and serialized worker
 
-Package SessionStart, Stop, SubagentStop and SessionEnd. Hooks only validate/enqueue locators and best-effort wake the worker. SessionStart repairs; Stop/subagent completion make progress eligible; SessionEnd can flush a short remainder. Start with configurable source-progress thresholds (provisional observation 10k / reflection 20k estimated tokens).
+Package SessionStart, Stop, SubagentStop and SessionEnd. Hooks only validate/enqueue locators and best-effort wake the worker. Project stdin per event: only SubagentStop builds a subagent locator; other events build parent locators even when agent fields are present. Keep the accepted source locator spec unchanged. SessionStart repairs; Stop/subagent completion make progress eligible; SessionEnd can flush a short remainder. Start with configurable source-progress thresholds (provisional observation 10k / reflection 20k estimated tokens).
 
 Test wake-up loss, concurrent hooks, crash after append/before acknowledgement, stale lease, slow provider, retry exhaustion, unrelated-session progress, process shutdown and lease release. No invisible infinite retry or live-PID-only progress assumption. Bound/rotate operational logs.
 

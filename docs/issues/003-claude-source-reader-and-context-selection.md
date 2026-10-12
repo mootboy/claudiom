@@ -2,7 +2,7 @@
 
 # Claude source reader and context selection
 
-- Status: in-progress — user marked ready and authorized stage-2 implementation; acceptance pending
+- Status: done — stage 2 accepted by the user after implementation re-review; PR merge remains with Linus (no squash)
 - Category: enhancement
 - Parent: [001 — Initial 0.1.0](001-initial-release.md)
 - Milestone: stage 2 of the [release plan](../plan-0.1.0.md#2-claude-source-reader-and-context-selection)
@@ -10,7 +10,7 @@
 
 ## Goal and boundary
 
-Provide a bounded, read-only reader for explicitly supplied Claude parent/subagent streams, deterministic citation-bearing context selection for stage 3, and citation verification during `recall` without returning source content. The user approved the contract below. The [structural findings and manual checks](../claude-transcripts.md) are complete and the attachment-record policy is approved. No open user decisions remain and both approved final-review fixes are incorporated. The user marked 003 ready and authorized implementation; implementation is complete and ready for review, not yet accepted. There is no repository probe slice, probe code or probe PR.
+Provide a bounded, read-only reader for explicitly supplied Claude parent/subagent streams, deterministic citation-bearing context selection for stage 3, and citation verification during `recall` without returning source content. The user approved the contract below. The [structural findings and manual checks](../claude-transcripts.md) are complete and the attachment-record policy is approved. No open user decisions remain and both approved final-review fixes are incorporated. The user marked 003 ready and authorized implementation; implementation is complete and accepted after re-review resolved items 1–3 and verified all 13 criteria and evidence links. There is no repository probe slice, probe code or probe PR.
 
 Read with [architecture](../architecture.md), [memory semantics](../memory-model.md), [Claude integration guidance](../claude-integration.md), and the [native persistence contract](../native-persistence.md). Hook fields are documented input contracts; observed transcript shapes are evidence, not a guaranteed Claude schema.
 
@@ -21,7 +21,7 @@ Stage 2 returns candidate identities, ranges and prefix digests, not authoritati
 1. **Completed:** the throwaway read-only structural scan is recorded in [Claude transcript findings](../claude-transcripts.md), including observed shapes/enums and record-version scope. It is not repository code, a shipped interface, or a PR; no probe implementation or redaction/sentinel test suite is part of 003.
 2. **Completed user checks:** `/clear` creates a new session file; `/compact`, `--resume` and fork preserved the prior byte prefix, with no rewrite observed. D6 is satisfied and the D1 prefix/incarnation contract below is frozen. Hook paths are absolute; no tilde expansion is needed. Missing subagent sources are normal no-ops.
 3. **Approved policy:** use the attachment-type allowlist below. Findings, manual outcomes and the policy are recorded in `docs/claude-transcripts.md`; commit findings only, never transcripts or hook payloads.
-4. **Authorized and implemented:** the user marked 003 ready for reader/selection/verification and the scoped native schema/spec/fixture amendment. Review/acceptance is pending; user merges without squash.
+4. **Authorized and implemented:** the user marked 003 ready for reader/selection/verification and the scoped native schema/spec/fixture amendment. The user accepted stage 2 after implementation re-review; Linus merges the PR without squash.
 
 ## Explicit locators and source safety
 
@@ -153,11 +153,11 @@ The private `Stop`/`SubagentStop` hook capture showed absolute paths and extra e
 
 Commit only reviewed structural findings and content-free manual outcomes, never source text, private paths/cwd/IDs, actual timestamps, raw prefix digests or hook stdin. Build invented synthetic fixtures from confirmed findings. Normal tests/CI never run the throwaway scan or manual checks and use no host transcripts, Claude installation, credentials or hooks. This task does not authorize this assistant to perform those checks or launch Claude sessions.
 
-No broad per-scenario probe workflow is required. Preserve evidence limits for unobserved variants, nested/parallel subagents or interruption behavior; the release Claude version floor remains a hooks-stage decision. D6 is satisfied, D1 is frozen and all user policy decisions for 003 are resolved. The approved final-review fixes are complete; the user authorized implementation, now awaiting review/acceptance.
+No broad per-scenario probe workflow is required. Preserve evidence limits for unobserved variants, nested/parallel subagents or interruption behavior; the release Claude version floor remains a hooks-stage decision. D6 is satisfied, D1 is frozen and all user policy decisions for 003 are resolved. The approved final-review fixes are complete; the user accepted the implemented stage-2 slice after re-review.
 
 ## Acceptance criteria and evidence
 
-Checked criteria record implementation evidence, not final user acceptance (still pending). No assistant-run real Claude probe or universal transcript-schema guarantee is claimed.
+All 13 criteria and their evidence were verified at re-review; the user accepted stage 2. No assistant-run real Claude probe or universal transcript-schema guarantee is claimed.
 
 - [x] Contract and characterized locator/record shapes are reviewed; unverified behavior and investigated rewrites are identified honestly.
   - Evidence: [`source-safety-cancellation-and-stream-boundaries`](../../test/cljs/claudiom/source_test.cljs#L158), [characterized findings and manual checks](../claude-transcripts.md).
