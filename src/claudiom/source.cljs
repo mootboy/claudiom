@@ -233,7 +233,8 @@
       (true? (:isMeta record)) {:reason "meta"}
       (and user? origin? (not= "human" origin)) {:reason "origin_excluded"}
       :else
-      {:attribution (cond tool? "tool" (= type "assistant") "assistant"
+      {:attribution (cond (true? (:isCompactSummary record)) "compaction summary"
+                          tool? "tool" (= type "assistant") "assistant"
                           subagent? "delegating parent agent" origin? "user"
                           (= "sdk" (:promptSource record)) "SDK caller" :else "user, origin unrecorded")
        :model_generated (or (= type "assistant") (true? (:isCompactSummary record)))
@@ -306,8 +307,7 @@
                     (recur (+ offset n)))))
               (let [after (fs/fstatSync fd) current (fs/lstatSync (:path citation))]
                 (when (or (not (.isFile current)) (not= (.-ino stat) (.-ino current))
-                          (not= (.-dev stat) (.-dev current)) (< (.-size after) end)
-                          (not= (.-mtimeMs stat) (.-mtimeMs after)) (not= (.-ctimeMs stat) (.-ctimeMs after)))
+                          (not= (.-dev stat) (.-dev current)) (< (.-size after) end))
                   (fail "unreadable")))
               (if (= sha256 (digest h)) "verified" "changed")))
         (finally (fs/closeSync fd))))

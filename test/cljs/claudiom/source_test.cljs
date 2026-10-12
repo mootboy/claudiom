@@ -70,7 +70,11 @@
            huge (str (apply str (repeat 500 "x")) "\n") malformed "{bad}\n"
            unknown (line {:type "environment" :value "PAYLOAD"})]
        (fs/writeFileSync p (str huge malformed unknown valid "tail"))
-       (let [result (selected loc empty-fold {:line_bytes 200 :parsed_bytes 200})]
+       (let [parsed (atom []) original source/parse-record
+             result (with-redefs [source/parse-record (fn [raw] (swap! parsed conj (.-length raw)) (original raw))]
+                      (selected loc empty-fold {:line_bytes 200 :parsed_bytes 200}))]
+         (is (= 3 (count @parsed)))
+         (is (every? #(<= % 200) @parsed))
          (is (= ["oversized" "malformed" "unknown_type" nil] (mapv :reason (:context result))))
          (is (= (+ (js/Buffer.byteLength malformed) (js/Buffer.byteLength unknown) (js/Buffer.byteLength valid)) (:parsed_bytes result)))
          (is (= (sha huge) (get-in result [:context 0 :citation :locator :sha256])))
@@ -89,7 +93,7 @@
    (fn [dir]
      (doseq [sub? [false true] tool? [false true] meta [true false nil]
              origin ["human" "task-notification" "peer" "future" :malformed :absent]
-             sdk? [false true]]
+             sdk? [false true :other]]
        (let [loc (cond-> (locator dir) sub? (assoc :agent_id "agent#id" :agent_transcript_path (path/join dir "agent.jsonl") :agent_type ""))
              p (or (:agent_transcript_path loc) (:transcript_path loc))
              record (cond-> (user-record "TEXT_SENTINEL")
@@ -98,10 +102,11 @@
                       (= origin :absent) (dissoc :origin)
                       (= origin :malformed) (assoc :origin {})
                       (string? origin) (assoc :origin {:kind origin})
-                      sdk? (assoc :promptSource "sdk"))
+                      (= true sdk?) (assoc :promptSource "sdk")
+                      (= :other sdk?) (assoc :promptSource "cli"))
              omitted? (or (true? meta) (not (contains? #{"human" :absent} origin)))
              expected (cond omitted? nil tool? "tool" sub? "delegating parent agent"
-                            (= origin "human") "user" sdk? "SDK caller" :else "user, origin unrecorded")]
+                            (= origin "human") "user" (= true sdk?) "SDK caller" :else "user, origin unrecorded")]
          (fs/writeFileSync p (line record))
          (let [result (selected loc empty-fold {}) entry (first (:context result))]
            (is (= expected (:attribution entry)))
@@ -109,6 +114,21 @@
            (when omitted?
              (is (some? (:reason entry)))
              (is (not (str/includes? (js/JSON.stringify (clj->js entry)) "SENTINEL"))))))))))
+
+(deftest compaction-summary-attribution
+  (temporary
+   (fn [dir]
+     (doseq [sub? [false true] tool? [false true] sdk? [false true] origin? [false true]]
+       (let [loc (cond-> (locator dir) sub? (assoc :agent_id "agent" :agent_transcript_path (path/join dir "agent.jsonl")))
+             p (or (:agent_transcript_path loc) (:transcript_path loc))
+             record (cond-> (assoc (user-record "model summary") :isCompactSummary true)
+                      (not origin?) (dissoc :origin)
+                      sdk? (assoc :promptSource "sdk")
+                      tool? (assoc-in [:message :content] [{:type "tool_result" :content "summarized tool evidence"}]))]
+         (fs/writeFileSync p (line record))
+         (let [entry (first (:context (selected loc empty-fold {})))]
+           (is (= "compaction summary" (:attribution entry)))
+           (is (true? (:model_generated entry)))))))))
 
 (deftest attachment-and-mixed-block-privacy
   (temporary
@@ -144,6 +164,7 @@
        (is (= "missing_subagent" (:status (selected agent empty-fold {}))))
        (is (nil? (:coverage (selected agent {:session "session" :coverage {["observation" "agent:a#0"] 42}} {}))))
        (fs/writeFileSync p data)
+       (is (= ["missing_subagent" "ok"] (mapv :status (source/read-sources [agent loc] empty-fold {}))))
        (is (= "stream_too_large" (:status (selected loc empty-fold {:stream_bytes (dec (js/Buffer.byteLength data))}))))
        (is (= "ok" (:status (selected loc empty-fold {:stream_bytes (js/Buffer.byteLength data)}))))
        (is (= "cancelled" (:status (selected loc empty-fold {:cancelled? (constantly true)}))))
@@ -239,11 +260,18 @@
        (let [missing (-> c (assoc :path (path/join dir "missing")) (assoc-in [:locator :end] 1))
              result (source/verify-memory {:citations (vec (repeat 257 missing))})]
          (is (= 256 (count (filter #(= "missing" (:source_status %)) (:citations result))))))
-       (let [original source/read-chunk! mutated (atom false)]
-         (with-redefs [source/read-chunk! (fn [fd buf offset length position]
-                                          (let [n (original fd buf offset length position)]
-                                            (when (compare-and-set! mutated false true) (fs/appendFileSync p "change")) n))]
-           (is (= "unreadable" (source/verify-range c nil))))))))
+       (doseq [mode [:append :rewrite]]
+         (fs/writeFileSync p data)
+         (let [original source/read-chunk! mutated (atom false)]
+           (with-redefs [source/read-chunk! (fn [fd buf offset length position]
+                                            (let [n (original fd buf offset length position)]
+                                              (when (compare-and-set! mutated false true)
+                                                (if (= mode :append)
+                                                    (do (fs/appendFileSync p "change")
+                                                        ;; Avoid depending on filesystem timestamp granularity.
+                                                        (fs/utimesSync p 946684800 946684800))
+                                                    (fs/writeFileSync p (str (subs data 0 (dec (count data))) "y")))) n))]
+             (is (= (if (= mode :append) "verified" "changed") (source/verify-range c nil)))))))))
   (private-state
    (fn [_]
      (with-redefs [source/open-source! (fn [_] (throw (js/Error. "Unexpected source I/O")))]
@@ -276,5 +304,8 @@
        (fs/symlinkSync (path/join dir "absent") p) (is (= "unreadable" (verify c)))
        (fs/rmSync p) (fs/mkdirSync p) (is (= "unreadable" (verify c)))
        (fs/rmSync p #js {:recursive true}) (fs/writeFileSync p data)
+       (let [ancestor (path/join dir "ancestor")]
+         (fs/symlinkSync dir ancestor)
+         (is (= "verified" (verify (assoc c :path (path/join ancestor "source"))))))
        (let [before (fs/readFileSync p)]
          (is (= "verified" (verify c))) (is (.equals before (fs/readFileSync p))))))))
