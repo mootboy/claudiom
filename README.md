@@ -2,7 +2,7 @@
 
 Independent observational memory for Claude Code, implemented in ClojureScript.
 
-**Pre-release, version 0.0.0.** Native persistence and read-only CLI listing/recall are implemented. Generation, transcript scanning, hooks and MCP are not. The target is [0.1.0](docs/plan-0.1.0.md).
+**Pre-release, version 0.0.0.** Native persistence, bounded explicit-source reading/selection and read-only CLI listing/recall with citation verification are implemented. Generation, transcript discovery, hooks and MCP are not. The target is [0.1.0](docs/plan-0.1.0.md).
 
 ## Development
 
@@ -33,7 +33,7 @@ node cli.js recall 'urn:claudiom:<encoded-session>:<encoded-memory>'
 node cli.js recall <local-id> --session <id>
 ```
 
-These commands return JSON from private native logs under XDG data storage. Public memory IDs are session-qualified URNs; recall reads only the addressed session. They never call models, create storage or modify transcripts. Corrupt sessions are skipped with identifying session-hash warnings on stderr; incomplete tails also produce repair-needed warnings. Results may be incomplete. Citations are returned without source expansion (`source_status: "not_checked"`).
+These commands return JSON from private native logs under XDG data storage. Public memory IDs are session-qualified URNs; recall reads only the addressed session. They never call models, create storage or modify transcripts. Corrupt sessions are skipped with identifying session-hash warnings on stderr; incomplete tails also produce repair-needed warnings. Results may be incomplete. List performs no source I/O (`source_status: "not_checked"`). Recall hashes bounded cited ranges, including reflection supports, and reports verified/changed/missing/unreadable/verification_limited without returning source content.
 
 Use `node cli.js repair --session <id>` explicitly to truncate an incomplete native-log tail; writers refuse to append until it is repaired. Repair never modifies Claude transcripts. No generation/commit command exists yet. See the [native persistence contract](docs/native-persistence.md) for format, limits and single-writer requirements.
 

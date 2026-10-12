@@ -4,4 +4,4 @@ Sequential Markdown issues; states: proposed, ready, in-progress, done. Done req
 
 - [001 — Initial 0.1.0](001-initial-release.md) — proposed, tracked by the staged plan.
 - [002 — Native persistence contract and reader](002-native-persistence-and-reader.md) — done, implementation and evidence-linked criteria accepted by the user.
-- [003 — Claude source reader and context selection](003-claude-source-reader-and-context-selection.md) — in-progress, user authorized implementation of the frozen source/selection/verification contract and prefix amendment. No repository probe slice.
+- [003 — Claude source reader and context selection](003-claude-source-reader-and-context-selection.md) — in-progress, authorized source/selection/verification and prefix amendment implemented with synthetic evidence; ready for user review/acceptance. No repository probe slice.
