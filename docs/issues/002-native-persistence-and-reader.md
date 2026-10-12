@@ -2,7 +2,7 @@
 
 # Native persistence contract and reader
 
-- Status: in-progress
+- Status: done
 - Category: enhancement
 - Parent: [001 — Initial 0.1.0](001-initial-release.md)
 - Milestone: stage 1 of the [release plan](../plan-0.1.0.md)
@@ -11,7 +11,7 @@
 
 Deliver the smallest native private-file store and independent `list` / `recall <id>` CLI. Synthetic generation commits must survive restart with memories and coverage intact, including successful empty results. No producer or model is needed for this milestone.
 
-Native persistence, listing and recall are implemented; acceptance review remains in progress.
+Native persistence, listing and recall are implemented and accepted by the user.
 
 ## Contract decisions
 
@@ -78,7 +78,7 @@ Acceptance-review response (2026-10-12): append now refuses unrepaired tails, an
 
 Re-review items 11–13: missing recall now exits 1 despite repair-needed warnings from an unrelated session (covered by a CLI regression test); only target-session corruption makes committed-memory absence uncertain; URN recall no longer inspects unrelated sessions. Per-session unsafe entries are documented as corrupt-session warnings. The user resolved store-wide corruption/write blocking through session-qualified URNs, implemented below.
 
-Keep this issue in-progress pending acceptance review. Tests simulate crash boundaries; they are not power-loss evidence. Caller serialization must cover the whole store, not only each session, because concurrent new-session writers could race the directory-count snapshot. No concurrent-writer guarantee or lease implementation is claimed.
+The user accepted stage 1 and this issue after the final re-review. Tests simulate crash boundaries; they are not power-loss evidence. Caller serialization must cover the whole store, not only each session, because concurrent new-session writers could race the directory-count snapshot. No concurrent-writer guarantee or lease implementation is claimed.
 
 ## Resolved decision: session-qualified identity
 
