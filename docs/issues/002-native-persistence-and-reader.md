@@ -58,7 +58,9 @@ These remain decision gates, not permission to assume undocumented Claude transc
 
 Initial writer/fold, specs and read-only CLI are implemented. Interface tests live in `test/cljs/claudiom/store_test.cljs`; process/packaging tests live in `test/cli.test.js`. They exercise durable empty coverage, replay/conflicts, interrupted and short writes, uncertain acknowledgement recovery, tail repair, malformed frames/duplicate keys/invalid UTF-8, lifecycle/support changes, cross-session identity conflicts, symlinks and private permissions.
 
-Keep this issue in-progress until the remaining acceptance hardening is reviewed: broader numerical-boundary cases, syscall failure coverage, generated fold/replay invariants, and exact-tarball nonempty list/recall evidence. These tests simulate crash boundaries; they are not power-loss evidence.
+Hardening evidence: `npm test` passes 18 ClojureScript tests with 352 assertions and 4 Node tests. Added strict calendar-date validation, enforcement before creating a 257th session, UTF-8 identifier/text/path boundaries, citation/memory counts, exact maximum event/log reads, interrupted/zero/short writes and repair-sync failures. Generated replay invariants run over 64 deterministic histories. The exact consumer tarball lists nonempty native fixtures and recalls a reflection through its supporting observation across separate processes, without modifying the log.
+
+Keep this issue in-progress pending acceptance review. Tests simulate crash boundaries; they are not power-loss evidence. Caller serialization must cover the whole store, not only each session, because global identity/count checks read a shared snapshot. No concurrent-writer guarantee or lease implementation is claimed.
 
 ## Out of scope
 

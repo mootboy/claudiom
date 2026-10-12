@@ -10,8 +10,11 @@
 (s/def ::version #{1})
 (s/def ::event_id identifier?)
 (s/def ::session_id identifier?)
-(s/def ::recorded_at #(and (string? %) (boolean (re-matches #"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z" %))
-                         (js/Number.isFinite (js/Date.parse %))))
+(s/def ::recorded_at
+  #(and (string? %) (boolean (re-matches #"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z" %))
+        (js/Number.isFinite (js/Date.parse %))
+        ;; Date.parse normalizes impossible dates and 24:00 into another day.
+        (= (subs % 0 19) (subs (.toISOString (js/Date. %)) 0 19))))
 (s/def ::kind #{"generation" "drop" "supersede"})
 (s/def ::lane #{"observation" "reflection"})
 (s/def ::input_id identifier?)
@@ -188,7 +191,7 @@
           (finally (fs/closeSync fd)))))
     (catch :default e
       (if (= "ENOENT" (.-code e)) {:events [] :state (fold-events []) :end 0 :size 0}
-          (throw e)))))
+          (fail)))))
 
 (declare read-states validate-global!)
 
@@ -206,7 +209,9 @@
         bytes (js/Buffer.from (str (js/JSON.stringify (clj->js event)) "\n"))]
     (when (or (> (.-length bytes) 1048576)
               (> (+ end (if replay? 0 (.-length bytes))) 16777216)) (fail))
-    (validate-global! (conj (vec (remove #(= (:session_id event) (:session %)) (read-states nil))) next-state))
+    (let [states (read-states nil)]
+      (when (and (>= (count states) 256) (not (fs/existsSync (path/dirname p)))) (fail))
+      (validate-global! (conj (vec (remove #(= (:session_id event) (:session %)) states)) next-state)))
     (ensure-path! (path/dirname p) true)
     (let [prior (when (fs/existsSync p) (check-entry! p true false))
           fd (fs/openSync p (bit-or (.-O_RDWR fs/constants) (.-O_CREAT fs/constants)

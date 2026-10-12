@@ -52,7 +52,7 @@ For the same event ID, equality means identical parsed event values (object key 
 
 ## Append, acknowledgement and repair
 
-The writer interface is single-writer per session. It does not introduce a worker or lock/lease subsystem in this slice; callers must serialize access. Reads during an append may report an incomplete tail and retry; they must not repair or mutate it. Concurrent-writer support requires the serialized worker increment, not a claim that an append syscall makes whole transactions safe.
+The writer interface requires one writer across the store (and therefore per session). It does not introduce a worker or lock/lease subsystem in this slice; callers must serialize access. Store-wide serialization is necessary because global memory-ID conflicts and the session-count limit are checked against a snapshot before writing; concurrent writers in different sessions could otherwise race these checks. Reads during an append may report an incomplete tail and retry; they must not repair or mutate it. Concurrent-writer support requires the serialized worker increment, not a claim that an append syscall makes whole transactions safe.
 
 Write the complete frame with a loop handling short writes, then fsync the file. For newly created entries, fsync containing directories so acknowledged storage survives restart. Acknowledge only after these operations succeed. In a write/fsync error, report an uncertain outcome and require recovery; never optimistically update coverage. Re-read the log on retry. A crash after a durable frame but before acknowledgement is resolved by event replay without another logical generation.
 
@@ -67,4 +67,4 @@ Only a writer/recovery operation may truncate an unterminated final tail back to
 
 ## Required evidence
 
-Issue 002 lists the interface/restart/safety acceptance cases. Add parameterized tests of actual private temporary files and packaged readers, with property tests where useful for pure fold/replay invariants. No host transcripts, real providers, hooks or background processes. This document specifies behavior, not proof that the implementation already provides it.
+Issue 002 lists the interface/restart/safety acceptance cases. Parameterized tests of actual private temporary files and packaged readers, plus deterministic generated fold/replay invariants, are in `test/cljs/claudiom/store_test.cljs` and `test/cli.test.js`. No host transcripts, real providers, hooks or background processes. This document specifies behavior, not proof that the implementation already provides it.

@@ -175,8 +175,125 @@
      (is (thrown? js/Error (store/append! (assoc event :session_id "other" :memories [observation]))))
      (is (= ["observation-1"] (mapv :id (store/list-memories nil)))))))
 
+(deftest timestamps-must-not-normalize-invalid-dates
+  (doseq [timestamp ["2026-02-30T12:00:00Z" "2026-10-12T24:00:00Z" "2026-13-12T12:00:00Z"]]
+    (private-state
+     (fn [_]
+       (is (thrown? js/Error (store/append! (assoc event :recorded_at timestamp))))
+       (is (not (fs/existsSync (store/root))))))))
+
+(deftest session-limit-rejects-new-session-before-writing
+  (private-state
+   (fn [_]
+     (store/ensure-path! (store/root) true)
+     (doseq [n (range 256)]
+       (fs/mkdirSync (path/dirname (store/log-path (str "session-" n))) #js {:mode 448}))
+     (is (thrown? js/Error (store/append! event)))
+     (is (not (fs/existsSync (store/log-path "synthetic"))))
+     ;; The limit must not prevent progress in an existing session directory.
+     (store/append! (assoc event :session_id "session-0"))
+     (is (= 100 (get-in (store/read-log (store/log-path "session-0")) [:state :coverage ["observation" "parent-1"]]))))))
+
+(deftest utf8-item-and-locator-boundaries
+  (doseq [[label accepted rejected]
+          [["identifier bytes" (assoc observation :id (apply str (repeat 128 "é")))
+            (assoc observation :id (apply str (repeat 129 "é")))]
+           ["text bytes" (assoc observation :text (apply str (repeat 8192 "é")))
+            (assoc observation :text (apply str (repeat 8193 "é")))]
+           ["locator bytes" (assoc-in observation [:citations 0 :path] (str "/" (apply str (repeat 4095 "x"))))
+            (assoc-in observation [:citations 0 :path] (str "/" (apply str (repeat 4096 "x"))))]
+           ["citation count" (assoc observation :citations (vec (repeat 256 (first (:citations observation)))))
+            (assoc observation :citations (vec (repeat 257 (first (:citations observation)))))]
+           ["subagent attribution" (-> observation (assoc-in [:citations 0 :stream] "subagent")
+                                       (assoc-in [:citations 0 :agent_id] "synthetic-agent")
+                                       (assoc-in [:citations 0 :source_id] "synthetic-source-id"))
+            (assoc-in observation [:citations 0 :stream] "subagent")]]]
+    (private-state
+     (fn [_]
+       (testing label
+         (is (thrown? js/Error (store/append! (assoc event :memories [rejected]))))
+         (is (not (fs/existsSync (store/root))))
+         (store/append! (assoc event :memories [accepted]))
+         (is (= (:citations accepted)
+                (mapv #(dissoc % :source_status) (:citations (store/recall (:id accepted) nil)))))))))
+  (doseq [n [256 257]]
+    (private-state
+     (fn [_]
+       (let [commit (assoc event :memories (mapv #(assoc observation :id (str "observation-" %)) (range n)))]
+         (if (= n 256)
+           (do (store/append! commit) (is (= n (count (store/list-memories nil)))))
+           (is (thrown? js/Error (store/append! commit)))))))))
+
+(deftest bounded-log-and-tail-reads
+  (private-state
+   (fn [_]
+     (store/ensure-path! (path/dirname (store/log-path "synthetic")) true)
+     (let [p (store/log-path "synthetic") json (js/JSON.stringify (clj->js event))
+           frame (str json (apply str (repeat (- 1048576 (js/Buffer.byteLength json) 1) " ")) "\n")]
+       ;; Sixteen maximum-sized valid frames, all identical event replays.
+       (fs/writeFileSync p (apply str (repeat 16 frame)) #js {:mode 384})
+       (is (= 100 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))
+       (store/append! event)
+       (is (= 16777216 (.-size (fs/statSync p))))
+       (is (thrown? js/Error (store/append! (assoc event :event_id "over-log-limit"
+                                                :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}))))
+       (is (= 16777216 (.-size (fs/statSync p)))))))
+  (private-state
+   (fn [_]
+     (store/append! event)
+     (let [p (store/log-path "synthetic") fd (fs/openSync p "r+")]
+       (try (fs/ftruncateSync fd 16777217) (finally (fs/closeSync fd)))
+       (is (thrown? js/Error (store/read-log p))))))
+  (private-state
+   (fn [_]
+     (store/append! event)
+     (let [p (store/log-path "synthetic")]
+       (fs/appendFileSync p (apply str (repeat 1048577 "x")))
+       (is (thrown? js/Error (store/read-log p)))
+       (is (thrown? js/Error (store/append! event)))))))
+
+(defn generated-history [seed]
+  ;; Reproducible bounded generator: several independent lanes/inputs, varying
+  ;; increments and replay insertion positions. No host randomness or fixtures.
+  (loop [seed seed index 0 coverage {} events []]
+    (if (= index 30) events
+      (let [seed (mod (* seed 48271) 2147483647)
+            lane (if (even? seed) "observation" "reflection")
+            input (str "input-" (mod seed 3)) key [lane input]
+            from (get coverage key 0) to (+ from 1 (mod seed 97))
+            e (assoc event :event_id (str "generated-" index)
+                     :coverage {:lane lane :input_id input :from from :to to})]
+        (recur seed (inc index) (assoc coverage key to) (conj events e))))))
+
+(deftest generated-replay-invariants
+  (doseq [seed (range 1 65)]
+    (let [events (generated-history seed)
+          expected (store/fold-events events)
+          replayed (mapcat (fn [e] (repeat (inc (mod (+ seed (get-in e [:coverage :to])) 4)) e)) events)]
+      (testing (str "seed " seed)
+        (is (= expected (store/fold-events replayed)))
+        (is (= expected (store/fold-events (concat events (reverse events)))))
+        (is (thrown? js/Error (store/fold-events (conj events (assoc (first events) :recorded_at "2026-10-13T00:00:00Z")))))
+        (is (every? pos? (vals (:coverage expected))))))))
+
+(deftest zero-write-and-repair-sync-failure
+  (private-state
+   (fn [_]
+     (with-redefs [store/write-chunk! (fn [& _] 0)]
+       (is (thrown? js/Error (store/append! event))))
+     (is (= {} (:coverage (:state (store/read-log (store/log-path "synthetic"))))))
+     (store/append! event)
+     (let [p (store/log-path "synthetic") next (assoc event :event_id "next"
+                                                   :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})]
+       (fs/appendFileSync p "unfinished")
+       (with-redefs [store/sync! (fn [_] (throw (js/Error. "Synthetic repair sync failure.")))]
+         (is (thrown? js/Error (store/append! next))))
+       (is (= 100 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))
+       (store/append! next)
+       (is (= 200 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))))))
+
 (deftest unsafe-storage-is-rejected
-  (doseq [scenario [:relative :empty :symlink :permissions :directory-log :dangling]]
+  (doseq [scenario [:relative :empty :symlink :permissions :directory-permissions :log-symlink :directory-log :dangling]]
     (private-state
      (fn [root]
        (case scenario
@@ -185,6 +302,9 @@
          :symlink (fs/symlinkSync root (path/join root "claudiom"))
          :dangling (fs/symlinkSync (path/join root "missing") (path/join root "claudiom"))
          :permissions (do (store/append! event) (fs/chmodSync (store/log-path "synthetic") 420))
+         :directory-permissions (do (store/append! event) (fs/chmodSync (path/dirname (store/log-path "synthetic")) 493))
+         :log-symlink (do (store/append! event) (fs/unlinkSync (store/log-path "synthetic"))
+                          (fs/symlinkSync (path/join root "missing") (store/log-path "synthetic")))
          :directory-log (do (store/append! event) (fs/unlinkSync (store/log-path "synthetic"))
                             (fs/mkdirSync (store/log-path "synthetic") #js {:mode 448})))
        (testing (name scenario) (is (thrown? js/Error (store/append! event))))))))
