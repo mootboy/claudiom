@@ -1,6 +1,7 @@
 (ns claudiom.store
   (:require [cljs.spec.alpha :as s]
             [clojure.string :as str]
+            [claudiom.source :as source]
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:crypto" :as crypto]))
@@ -169,28 +170,7 @@
   (when-not (identifier? session) (fail))
   (path/join (root) (.digest (.update (crypto/createHash "sha256") session) "hex") "events.jsonl"))
 
-(defn parse-event [line]
-  (let [parsed (js->clj (js/JSON.parse line) :keywordize-keys true)
-        tokens (re-seq #"\"(?:\\.|[^\"\\])*\"|[{}\[\]:,]|-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null" line)]
-    ;; JSON.parse validates syntax; this walk additionally rejects duplicate
-    ;; object keys, including differently escaped spellings of the same key.
-    (letfn [(value [ts]
-              (case (first ts)
-                "{" (loop [remaining (rest ts) seen #{}]
-                      (if (= "}" (first remaining)) (rest remaining)
-                          (let [key (js/JSON.parse (first remaining))]
-                            (when (contains? seen key) (fail))
-                            (let [after (value (drop 2 remaining))]
-                              (if (= "," (first after))
-                                (recur (rest after) (conj seen key))
-                                (rest after))))))
-                "[" (loop [remaining (rest ts)]
-                      (if (= "]" (first remaining)) (rest remaining)
-                          (let [after (value remaining)]
-                            (if (= "," (first after)) (recur (rest after)) (rest after)))))
-                (rest ts)))]
-      (value tokens))
-    parsed))
+(defn parse-event [line] (source/parse-record line))
 
 (defn read-log [p]
   (ensure-path! (path/dirname p) false)
@@ -340,7 +320,7 @@
                            (cond-> (present state m)
                              (:supports m) (assoc :supporting_observations
                                                   (mapv #(present state (get-in state [:definitions %])) (:supports m)))))) healthy))]
-    {:result result :warnings warnings :incomplete (boolean (some #(= "corrupt" (:kind %)) warnings))}))
+    {:result (if (and (= command "recall") result) (source/verify-memory result) result) :warnings warnings :incomplete (boolean (some #(= "corrupt" (:kind %)) warnings))}))
 
 (defn list-memories [session] (:result (retrieve "list" nil session)))
 (defn recall [id session] (:result (retrieve "recall" id session)))

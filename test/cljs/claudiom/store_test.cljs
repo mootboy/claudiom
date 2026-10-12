@@ -1,6 +1,7 @@
 (ns claudiom.store-test
   (:require [cljs.test :refer-macros [deftest is testing]]
             [claudiom.store :as store]
+            [claudiom.source :as source]
             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]))
@@ -14,7 +15,8 @@
   (let [root (fs/mkdtempSync (path/join (os/tmpdir) "claudiom-store-"))
         old (.-XDG_DATA_HOME js/process.env)]
     (set! (.-XDG_DATA_HOME js/process.env) root)
-    (try (f root)
+    ;; Native-only fixtures have invented paths; never consult the host for them.
+    (try (with-redefs [source/verify-range (fn [_ _] "missing")] (f root))
          (finally
            (if (some? old) (set! (.-XDG_DATA_HOME js/process.env) old)
                (js/Reflect.deleteProperty js/process.env "XDG_DATA_HOME"))
@@ -114,7 +116,7 @@
      (store/append! (lifecycle-event "drop-1" "drop" {:memory_id "observation-1"}))
      (is (= ["reflection-1"] (mapv :local_id (store/list-memories nil))))
      (is (= "dropped" (:status (first (:supporting_observations (store/recall "reflection-1" "synthetic"))))))
-     (is (= "not_checked" (:source_status (first (:citations (store/recall "observation-1" "synthetic"))))))
+     (is (= "missing" (:source_status (first (:citations (store/recall "observation-1" "synthetic"))))))
      (store/append! (assoc event :event_id "correction-definition"
                           :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200}
                           :memories [(assoc observation :id "observation-2" :text "Corrected synthetic decision.")]))
