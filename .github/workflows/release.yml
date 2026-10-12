@@ -1,0 +1,66 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: shadow-cljs.edn
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.19.0"
+          cache: npm
+      - name: Validate post-merge tag and release metadata
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_TAG^{}")"
+          node scripts/release-metadata.mjs
+      - name: Require successful CI for the merged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          successful=$(gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" --branch main --event push --json conclusion,status --jq 'any(.[]; .status == "completed" and .conclusion == "success")')
+          test "$successful" = true
+      - run: npm ci --ignore-scripts
+      - run: npm run ci
+      - name: Pack and checksum
+        id: package
+        run: |
+          mkdir release-assets
+          filename=$(npm pack --pack-destination release-assets --silent)
+          (cd release-assets && sha256sum "$filename" > "$filename.sha256")
+          echo "tarball=$PWD/release-assets/$filename" >> "$GITHUB_OUTPUT"
+      - name: Smoke-test exact artifact
+        run: node --test --test-name-pattern="exact tarball" test/cli.test.js
+        env:
+          CLAUDIOM_PACKAGE_TARBALL: ${{ steps.package.outputs.tarball }}
+      - name: Publish tested GitHub artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --generate-notes --title "claudiom $RELEASE_TAG"
+          gh release edit "$RELEASE_TAG" --draft=false

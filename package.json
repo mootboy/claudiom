@@ -1,0 +1,35 @@
+{
+  "name": "@mootboy/claudiom",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Independent observational memory for Claude Code",
+  "type": "module",
+  "bin": {
+    "claudiom": "./cli.js"
+  },
+  "files": [
+    "cli.js",
+    "dist/claudiom.js",
+    "README.md",
+    "CHANGELOG.md",
+    "docs/"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "shadow-cljs release cli",
+    "clean": "rm -rf dist target .shadow-cljs",
+    "test": "npm run build && npm run test:cljs && node --test test/*.test.js",
+    "test:cljs": "shadow-cljs compile test",
+    "watch": "shadow-cljs watch dev test",
+    "dev": "node --input-type=module -e \"import('./target/dev/claudiom.js').then(({start}) => start(process.argv.slice(1), 'dev'))\"",
+    "check:dist": "git diff --exit-code -- dist/claudiom.js",
+    "ci": "npm run clean && npm test && npm run check:dist",
+    "preversion": "npm run ci"
+  },
+  "devDependencies": {
+    "shadow-cljs": "3.5.3"
+  }
+}

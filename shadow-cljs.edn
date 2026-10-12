@@ -1,0 +1,16 @@
+{:source-paths ["src" "test/cljs"]
+ :builds
+ {:cli {:target :esm
+        :output-dir "dist"
+        :js-options {:js-provider :import}
+        :modules {:claudiom {:entries [claudiom.cli]
+                             :exports {start claudiom.cli/start}}}}
+  :dev {:target :esm
+        :output-dir "target/dev"
+        :js-options {:js-provider :import}
+        :modules {:claudiom {:entries [claudiom.cli]
+                             :exports {start claudiom.cli/start}}}}
+  :test {:target :node-test
+         :output-to "target/tests.cjs"
+         :ns-regexp "-test$"
+         :autorun true}}}

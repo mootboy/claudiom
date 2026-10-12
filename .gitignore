@@ -1,0 +1,9 @@
+node_modules/
+target/
+.shadow-cljs/
+.clj-kondo/.cache/
+.lsp/
+.cpcache/
+.nrepl-port
+*.tgz
+release-assets/
