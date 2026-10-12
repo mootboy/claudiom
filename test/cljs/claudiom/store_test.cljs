@@ -7,7 +7,7 @@
 
 (def event {:version 1 :event_id "empty-1" :session_id "synthetic"
             :recorded_at "2026-10-12T12:00:00Z" :kind "generation"
-            :coverage {:lane "observation" :input_id "parent-1" :from 0 :to 100}
+            :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 0 :to 100}
             :memories []})
 
 (defn private-state [f]
@@ -19,6 +19,19 @@
            (if (some? old) (set! (.-XDG_DATA_HOME js/process.env) old)
                (js/Reflect.deleteProperty js/process.env "XDG_DATA_HOME"))
            (fs/rmSync root #js {:recursive true :force true})))))
+
+(deftest observation-prefix-is-atomic-and-required
+  (private-state
+   (fn [_]
+     (doseq [bad [(update event :coverage dissoc :prefix_sha256)
+                  (assoc-in event [:coverage :prefix_sha256] "bad")]]
+       (is (thrown? js/Error (store/append! bad)))
+       (is (not (fs/existsSync (store/root)))))
+     (store/append! event)
+     (is (= (get-in event [:coverage :prefix_sha256])
+            (get-in (store/read-log (store/log-path "synthetic")) [:state :prefixes "parent-1"])))
+     (is (thrown? js/Error
+                  (store/append! (assoc-in event [:coverage :prefix_sha256] (apply str (repeat 64 "b")))))))))
 
 (deftest empty-commit-restart-and-replay
   (private-state
@@ -74,7 +87,7 @@
    (fn [_]
      (store/append! event)
      (store/append! (-> event (assoc :event_id "empty-2")
-                        (assoc :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})))
+                        (assoc :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200})))
      (store/append! (-> event (assoc :event_id "reflection-empty")
                         (assoc :coverage {:lane "reflection" :input_id "feed-1" :from 0 :to 1})))
      (is (= {["observation" "parent-1"] 200 ["reflection" "feed-1"] 1}
@@ -103,7 +116,7 @@
      (is (= "dropped" (:status (first (:supporting_observations (store/recall "reflection-1" "synthetic"))))))
      (is (= "not_checked" (:source_status (first (:citations (store/recall "observation-1" "synthetic"))))))
      (store/append! (assoc event :event_id "correction-definition"
-                          :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}
+                          :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200}
                           :memories [(assoc observation :id "observation-2" :text "Corrected synthetic decision.")]))
      (store/append! (lifecycle-event "correction" "supersede"
                                     {:memory_id "observation-1" :replacement_id "observation-2" :reason "Synthetic correction."}))
@@ -192,7 +205,7 @@
      (is (thrown? js/Error (store/recall (store/memory-urn "synthetic" "observation-1") "other")))
      (is (= "observation-1" (:local_id (store/recall "observation-1" "synthetic"))))
      (is (thrown? js/Error (store/append! (assoc event :event_id "conflicting-definition"
-                                               :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}
+                                               :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200}
                                                :memories [(assoc observation :text "Conflicting.")])))))))
 
 (deftest urn-encoding-and-validation
@@ -275,7 +288,7 @@
        (store/append! event)
        (is (= 16777216 (.-size (fs/statSync p))))
        (is (thrown? js/Error (store/append! (assoc event :event_id "over-log-limit"
-                                                :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}))))
+                                                :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200}))))
        (is (= 16777216 (.-size (fs/statSync p)))))))
   (private-state
    (fn [_]
@@ -301,7 +314,8 @@
             input (str "input-" (mod seed 3)) key [lane input]
             from (get coverage key 0) to (+ from 1 (mod seed 97))
             e (assoc event :event_id (str "generated-" index)
-                     :coverage {:lane lane :input_id input :from from :to to})]
+                     :coverage (cond-> {:lane lane :input_id input :from from :to to}
+                                 (= lane "observation") (assoc :prefix_sha256 (apply str (repeat 64 "a")))))]
         (recur seed (inc index) (assoc coverage key to) (conj events e))))))
 
 (deftest generated-replay-invariants
@@ -323,7 +337,7 @@
      (is (= {} (:coverage (:state (store/read-log (store/log-path "synthetic"))))))
      (store/append! event)
      (let [p (store/log-path "synthetic") next (assoc event :event_id "next"
-                                                   :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})]
+                                                   :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200})]
        (fs/appendFileSync p "unfinished")
        (is (thrown? js/Error (store/append! next)))
        (with-redefs [store/sync! (fn [_] (throw (js/Error. "Synthetic repair sync failure.")))]
@@ -347,7 +361,7 @@
    (fn [_]
      (store/append! event)
      (let [p (store/log-path "synthetic") next (assoc event :event_id "unterminated"
-                                                   :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})
+                                                   :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200})
            json (js/JSON.stringify (clj->js next))]
        (fs/appendFileSync p json)
        (is (= 100 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))
@@ -366,7 +380,7 @@
      (let [original store/read-log reads (atom [])]
        (with-redefs [store/read-log (fn [p] (swap! reads conj p) (original p))]
          (store/append! (assoc event :event_id "next"
-                              :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})))
+                              :coverage {:prefix_sha256 (apply str (repeat 64 "a")) :lane "observation" :input_id "parent-1" :from 100 :to 200})))
        (is (= [(store/log-path "synthetic")] @reads)))
      (store/append! (assoc event :session_id "new-session" :memories [observation]))
      (is (thrown? js/Error (store/append! (assoc event :session_id "damaged"))))

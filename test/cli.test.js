@@ -35,7 +35,7 @@ function installSyntheticFixture(root, session = "synthetic") {
   }
   const observation = { version: 1, event_id: "fixture-1", session_id: session,
     recorded_at: "2026-10-12T12:00:00Z", kind: "generation",
-    coverage: { lane: "observation", input_id: "parent-1", from: 0, to: 100 },
+    coverage: { prefix_sha256: "a".repeat(64), lane: "observation", input_id: "parent-1", from: 0, to: 100 },
     memories: [{ id: "observation-1", kind: "observation", text: "Synthetic decision.", source_time: null,
       citations: [{ citation_version: 1, stream: "parent", agent_id: null, source_id: null, path: "/synthetic/unavailable.jsonl",
         locator: { input_id: "parent-1", start: 0, end: 100, sha256: "a".repeat(64) } }] }] };
