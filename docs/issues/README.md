@@ -10,4 +10,4 @@ Sequential Markdown issues; states: proposed, ready, in-progress, done. Done req
 - [006 — Reflections and consolidation](006-reflections-and-consolidation.md) — proposed, exact-support implied archival plan only.
 - [007 — MCP reads, setup, packaging and release](007-mcp-reads-setup-packaging-and-release.md) — proposed, implementation and release approvals remain separate.
 
-The in-session redesign is user-approved; these issues are not implementation authorization. The superseded untracked provider-adapter draft is excluded from the plan-revision PR and preserved pending the user's deletion approval.
+The in-session redesign is user-approved; these issues are not implementation authorization. The superseded untracked provider-adapter draft was deleted with the user's approval; it is not part of the plan-revision PR.
