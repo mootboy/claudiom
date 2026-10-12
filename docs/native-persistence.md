@@ -1,6 +1,6 @@
 # Native persistence contract v1
 
-Status: stage-1 writer/fold and CLI reader implemented and accepted by the user for issue [002](issues/002-native-persistence-and-reader.md). The stage-2 observation-prefix and recall-verification amendments below are approved plans, not implemented; their implementation requires the user to mark [003](issues/003-claude-source-reader-and-context-selection.md) ready. Readiness follows a throwaway structural scan and user-run manual prefix/path checks recorded in `docs/claude-transcripts.md`; no repository probe slice is authorized. Applies to Linux initially. All examples below are synthetic.
+Status: stage-1 writer/fold and CLI reader implemented and accepted by the user for issue [002](issues/002-native-persistence-and-reader.md). The stage-2 observation-prefix and recall-verification amendments below are approved plans, not implemented; their implementation requires the user to mark [003](issues/003-claude-source-reader-and-context-selection.md) ready. Structural/manual evidence and user policy decisions are complete in [Claude transcript findings](claude-transcripts.md); D6 is satisfied and D1 is frozen. Final review and the user's explicit ready decision remain; no repository probe slice is authorized. Applies to Linux initially. All examples below are synthetic.
 
 Native v1 is unreleased. Amend its observation coverage in place with commit-bound prefix evidence; update specs and synthetic fixtures when implementation is authorized. No migration, legacy observation-coverage compatibility reader, or XDG-state sidecar is introduced. Existing stage-1 code does not yet accept the amended shape.
 
@@ -38,7 +38,7 @@ The source locator spec limits nonempty Unicode-scalar `agent_id` to 234 UTF-8 b
 
 Before resuming at the latest committed `to`, re-hash the current source prefix `[0, to)` in fixed chunks. A full digest match permits resume and preserves identity across path relocation or same-content inode replacement. A mismatch or size below `to` chooses `n = 1 + highest committed n` and replays from zero, without heuristic deduplication or inherited coverage. No prior committed incarnation means incarnation `n = 0` starting at byte zero; failed/precommit work does not consume an incarnation number. Missing/unreadable sources, cancellation and incomplete verification cannot justify unproven resume or silently mint a new incarnation.
 
-Source selection/prefix verification has a 256 MiB per-stream snapshot cap: exceed it and report `stream_too_large`, without restart or progress. Hash-only scans are fixed-chunk operations outside the 32 MiB parsed/materialized-byte run budget. Stage 2 returns candidate ranges and prefix evidence; only successful stage-3 generation commits advance authoritative coverage. Any manual check showing a rewrite rather than append blocks freezing these incarnation rules until examined; see issue 003. The store does not infer source identity/boundaries from Claude fields.
+Source selection/prefix verification has a 256 MiB per-stream snapshot cap: exceed it and report `stream_too_large`, without restart or progress. Hash-only scans are fixed-chunk operations outside the 32 MiB parsed/materialized-byte run budget. Stage 2 returns candidate ranges and prefix evidence; only successful stage-3 generation commits advance authoritative coverage. The completed `/compact`, `--resume` and fork checks preserved prior bytes, satisfying D6 and freezing D1. `/clear` creates a new session/file with independent coverage. These scoped observations do not replace runtime prefix verification or authorize ancestry transfer; see issue 003. The store does not infer source identity/boundaries from Claude fields.
 
 The first range starts at zero; subsequent ranges start at the prior committed `to`. Reject gaps, overlaps, regressions and a new event claiming previously covered work. Exact event replay is handled before coverage checks. Independent lanes and input IDs advance independently. Failed or cancelled generation produces no event.
 
@@ -61,6 +61,18 @@ A `drop` event adds only `memory_id`. It hides that ID from active listing, reta
 A `supersede` event adds `memory_id`, `replacement_id` and `reason` (nonempty bounded text). Both definitions must already exist in the same session, have the same kind, and differ in ID. Reject cycles and a second different replacement for an already superseded ID. The old ID becomes inactive and recall exposes the link. New definitions arrive through generation, not inline lifecycle replacements. Repeated identical supersession is harmless.
 
 Corrections never edit text in place. Corrected observations can invalidate reflection conclusions: expose affected reflections as `support_changed` and omit them from active listing until explicitly dropped or superseded. Preserve their historical supports for recall. Dropping a support alone does not assert its content was false and does not invalidate a reflection.
+
+## Stage-2 source and attachment contract (planned)
+
+Hook-shaped locator specs require absolute source paths without tilde/HOME expansion and tolerate extra envelope fields, including `scratchpad_dir`, `prompt_id` and `effort`; unrelated fields cannot authorize source discovery or control producer policy. Subagents use `agent_transcript_path`, not the parent path. Read explicitly supplied streams even with empty `agent_type`, but an absent subagent source is a normal no-op: no error, context, candidate/committed coverage or retry loop, including with prior coverage. Do not confuse this with a successful empty generation commit. Other healthy streams may progress. Stored-citation recall independently reports `missing` and preserves the stored memory.
+
+Source selection orders by byte offset, retains per-record cwd and timestamps, and applies an allowlist to top-level `attachment.type`:
+
+- `queued_command`: use `prompt` as a user message only with both `commandMode == "prompt"` and `origin.kind == "human"`; do not require `humanTurn`. Absent/invalid guards, peer input and task notifications are excluded.
+- `file` / `edited_text_file`: bounded filename-only markers using `displayPath`, else `filename`; absent names remain unavailable. Never include `content`/`snippet`, open the referenced file or claim its existence from the marker.
+- All other/future attachment types: omit with content-free markers and candidate progress. `environment`, `session_context` and `credential_org` must never reach a provider, including through raw-record fallback or copied metadata.
+
+This record policy is distinct from image/attachment content-block omission. Exact original-record citations and prefix digests include processed/omitted bytes without asserting facts from omitted payloads. Stage 2 does not write coverage; stage 3 commits successful processing atomically. Tool-result sidecar expansion is outside issue 003; references alone authorize no file reads. The native writer validates structure, not this producer selection policy; see [003](issues/003-claude-source-reader-and-context-selection.md) for bounds and planned interface evidence.
 
 ## Folding and replay
 

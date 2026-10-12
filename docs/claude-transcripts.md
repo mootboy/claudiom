@@ -70,11 +70,25 @@ Selection should allowlist `user` and `assistant`, plus policy-chosen `attachmen
 
 `turn_duration` 894, `stop_hook_summary` 492, `informational` 14, `compact_boundary` 7, `local_command` 5, `scheduled_task_fire` 2.
 
-## Open: requires the manual checks
+## Manual checks
 
-1. **Append vs rewrite** across `/compact`, `--resume` / `--continue`, `/clear` and fork. Finished files can't prove that earlier bytes were never rewritten. Hash a live transcript's prefix before and after each action.
-2. **Hook payload spelling.** Check whether `transcript_path` / `agent_transcript_path` are absolute or `~/`-prefixed, by dumping stdin from a temporary local hook.
-3. **The `attachment` record type** is 38% of parent records. It is distinct from the image/attachment *content blocks* the user decided to omit. Decide whether any `attachment` records belong in selection.
-   - Observed `attachment.type` values are mostly harness-injected context: `total_tokens_reminder`, `batching_reminder_sent`, `deferred_tools_*`, `environment`, `instructions`, `skill_listing`, `session_context`, `mcp_instructions_delta`, `model`, `date`, `hook_success`, `credential_org`, `diagnostics`, `auto_mode`, `task_reminder`, `nested_memory`, `compact_file_reference`, `thinking_*`, and others.
-   - User-originated values: `queued_command` (prompts typed while Claude was busy), `edited_text_file`, `file`, `prompt_snapshot`.
-   - Recommendation: allowlist `queued_command` only, as user input. Exclude the rest. `credential_org` and `environment` must never reach a provider.
+- **`/clear` (user-observed, 2026-10-12):** creates a new session file, i.e. a new session ID. The old session is a separate stream with its own native log, so there is no incarnation impact. This is consistent with the documented `SessionEnd` `reason: clear` for the old session and `SessionStart` `source: clear` for the new one. Whether the old file's bytes stay untouched was not separately hashed.
+
+- **`/compact`, `--resume` and fork (user-observed, 2026-10-12):** the SHA-256 of the transcript's prior bytes was unchanged after each action. Existing bytes are preserved, i.e. append-only; no rewrite was observed. This satisfies the D6 gate: the prefix-digest incarnation rule (D1) can be frozen, and it stays as a guard against unobserved rewrites. Whether `--resume` or fork continue the same file or start a new one was not recorded. Either way, prefix verification handles it.
+
+- **Hook payloads (user-captured `Stop` and `SubagentStop` stdin, 2026-10-12; only field names and structure inspected):**
+  - `transcript_path` and `agent_transcript_path` are absolute paths, with no `~/` prefix. The locator spec can require absolute paths; no `HOME` expansion is needed.
+  - `transcript_path` = `<project-dir>/<session_id>.jsonl`, and `agent_transcript_path` = `<project-dir>/<session_id>/subagents/agent-<agent_id>.jsonl`, matching the scanned layout. `agent_id` was 17 lowercase hex characters.
+  - Fields beyond the documented set were present: `scratchpad_dir`, `prompt_id`, `effort`. The locator spec must tolerate extra fields (as decided).
+  - The captured `SubagentStop` had an empty `agent_type`, and **its `agent_transcript_path` did not exist** when checked; the parent file did. Either internal agents fire `SubagentStop` without writing a transcript, or the file is written later or removed. The dump kept only the last event, so this is one observation. Requirement: a missing subagent source is a normal no-op outcome, with no error, no coverage and no retry loop. The stage 4 hook policy decides whether to enqueue empty-`agent_type` events.
+
+## Attachment record policy (user decision, 2026-10-12)
+
+`attachment` records are 38% of parent records and are mostly context injected by Claude Code. Selection uses an **allowlist on `attachment.type`**. Every other attachment type, including future ones, is omitted with a marker and coverage advances past it.
+
+- **`queued_command`:** include only when `commandMode == "prompt"` and `origin.kind == "human"`. Present it as a user message using `prompt`. Key on `origin.kind`, not `humanTurn`: 15 of the 29 human prompts lack `humanTurn`.
+  - Exclude `commandMode: task-notification` (44 observed, background task completions).
+  - Exclude `origin.kind: peer` (1 observed, from another session; untrusted).
+- **`file`, `edited_text_file`:** emit a filename-only marker, e.g. `[user referenced file <name>]` / `[file edited: <name>]`. Use `displayPath` when present, otherwise `filename`. Never include `content` or `snippet`.
+- **Everything else is excluded:** reminders and bookkeeping, `instructions`/`nested_memory`/`prompt_snapshot`, and hook output (`hook_success`, `hook_additional_context`).
+  - `environment`, `session_context` and `credential_org` must never reach a provider.
