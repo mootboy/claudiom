@@ -43,8 +43,12 @@
 (s/def ::input_id identifier?)
 (s/def ::from #(and (js/Number.isSafeInteger %) (<= 0 %)))
 (s/def ::to #(and (js/Number.isSafeInteger %) (pos? %)))
+(s/def ::prefix_sha256 #(and (string? %) (boolean (re-matches #"[0-9a-f]{64}" %))))
 (s/def ::coverage (s/and (s/keys :req-un [::lane ::input_id ::from ::to])
-                        #(= #{:lane :input_id :from :to} (set (keys %)))
+                        #(if (= "observation" (:lane %))
+                           (and (= #{:lane :input_id :from :to :prefix_sha256} (set (keys %)))
+                                (s/valid? ::prefix_sha256 (:prefix_sha256 %)))
+                           (= #{:lane :input_id :from :to} (set (keys %))))
                         #(< (:from %) (:to %))))
 (defn exact-keys? [m ks] (= (set ks) (set (keys m))))
 (defn bounded-text? [x] (and (string? x) (pos? (count x)) (<= (js/Buffer.byteLength x) 16384)))
@@ -101,7 +105,8 @@
     "generation"
     (let [c (:coverage event) k [(:lane c) (:input_id c)]]
       (when-not (= (get-in state [:coverage k] 0) (:from c)) (fail))
-      (assoc-in (reduce #(add-memory %1 event %2) state (:memories event)) [:coverage k] (:to c)))
+      (cond-> (assoc-in (reduce #(add-memory %1 event %2) state (:memories event)) [:coverage k] (:to c))
+        (= "observation" (:lane c)) (assoc-in [:prefixes (:input_id c)] (:prefix_sha256 c))))
     "drop" (update state :dropped conj (:memory_id event))
     "supersede"
     (let [id (:memory_id event) replacement (:replacement_id event)
@@ -124,7 +129,7 @@
               (-> (apply-event state event)
                   (assoc :session (:session_id event))
                   (assoc-in [:seen (:event_id event)] event))))
-          {:seen {} :coverage {} :session nil :definitions {} :dropped #{} :superseded {}} events))
+          {:seen {} :coverage {} :prefixes {} :session nil :definitions {} :dropped #{} :superseded {}} events))
 
 (defn check-entry! [p private? directory?]
   (let [st (fs/lstatSync p)]

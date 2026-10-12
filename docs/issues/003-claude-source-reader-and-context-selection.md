@@ -2,7 +2,7 @@
 
 # Claude source reader and context selection
 
-- Status: proposed — findings, decisions and approved final-review fixes complete; awaiting the user's explicit ready decision
+- Status: in-progress — user marked ready and authorized stage-2 implementation; acceptance pending
 - Category: enhancement
 - Parent: [001 — Initial 0.1.0](001-initial-release.md)
 - Milestone: stage 2 of the [release plan](../plan-0.1.0.md#2-claude-source-reader-and-context-selection)
