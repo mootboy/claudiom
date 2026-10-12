@@ -2,7 +2,7 @@
 
 Independent observational memory for Claude Code, implemented in ClojureScript.
 
-**Bootstrap only, version 0.0.0.** No generation, transcript scanning, hooks, persistence or recall is implemented yet. The target is [0.1.0](docs/plan-0.1.0.md).
+**Pre-release, version 0.0.0.** Native persistence and read-only CLI listing/recall are implemented. Generation, transcript scanning, hooks and MCP are not. The target is [0.1.0](docs/plan-0.1.0.md).
 
 ## Development
 
@@ -24,6 +24,15 @@ Claude transcripts are read-only input. Claudiom owns generation, native persist
 An **observation** retains a source-grounded decision or finding. A **reflection** synthesizes committed observations into higher-level understanding, with traceable support. See the planned [memory model](docs/memory-model.md).
 
 See [architecture](docs/architecture.md), [release plan](docs/plan-0.1.0.md) and [issues](docs/issues/README.md).
+
+## Native retrieval
+
+```sh
+node cli.js list [--session <id>]
+node cli.js recall <id> [--session <id>]
+```
+
+These commands return JSON from private native logs under XDG data storage. They never call models, create storage or modify transcripts. Citations are returned without source expansion (`source_status: "not_checked"`). No public generation/write command exists yet. See the [native persistence contract](docs/native-persistence.md) for format, limits and single-writer requirements.
 
 ## Acknowledgments
 
