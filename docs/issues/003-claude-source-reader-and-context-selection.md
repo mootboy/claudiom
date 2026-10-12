@@ -2,7 +2,7 @@
 
 # Claude source reader and context selection
 
-- Status: proposed — findings and user decisions complete; awaiting final review and the user's explicit ready decision
+- Status: proposed — findings, decisions and approved final-review fixes complete; awaiting the user's explicit ready decision
 - Category: enhancement
 - Parent: [001 — Initial 0.1.0](001-initial-release.md)
 - Milestone: stage 2 of the [release plan](../plan-0.1.0.md#2-claude-source-reader-and-context-selection)
@@ -10,7 +10,7 @@
 
 ## Goal and boundary
 
-Provide a bounded, read-only reader for explicitly supplied Claude parent/subagent streams, deterministic citation-bearing context selection for stage 3, and citation verification during `recall` without returning source content. The user approved the contract below. The [structural findings and manual checks](../claude-transcripts.md) are complete and the attachment-record policy is approved. No open user decisions remain; final review and the user's explicit ready decision still gate the reader, selector, citation verification and native coverage amendment. There is no repository probe slice, probe code or probe PR.
+Provide a bounded, read-only reader for explicitly supplied Claude parent/subagent streams, deterministic citation-bearing context selection for stage 3, and citation verification during `recall` without returning source content. The user approved the contract below. The [structural findings and manual checks](../claude-transcripts.md) are complete and the attachment-record policy is approved. No open user decisions remain and both approved final-review fixes are incorporated; the user's explicit ready decision still gates the reader, selector, citation verification and native coverage amendment. There is no repository probe slice, probe code or probe PR.
 
 Read with [architecture](../architecture.md), [memory semantics](../memory-model.md), [Claude integration guidance](../claude-integration.md), and the [native persistence contract](../native-persistence.md). Hook fields are documented input contracts; observed transcript shapes are evidence, not a guaranteed Claude schema.
 
@@ -21,7 +21,7 @@ Stage 2 returns candidate identities, ranges and prefix digests, not authoritati
 1. **Completed:** the throwaway read-only structural scan is recorded in [Claude transcript findings](../claude-transcripts.md), including observed shapes/enums and record-version scope. It is not repository code, a shipped interface, or a PR; no probe implementation or redaction/sentinel test suite is part of 003.
 2. **Completed user checks:** `/clear` creates a new session file; `/compact`, `--resume` and fork preserved the prior byte prefix, with no rewrite observed. D6 is satisfied and the D1 prefix/incarnation contract below is frozen. Hook paths are absolute; no tilde expansion is needed. Missing subagent sources are normal no-ops.
 3. **Approved policy:** use the attachment-type allowlist below. Findings, manual outcomes and the policy are recorded in `docs/claude-transcripts.md`; commit findings only, never transcripts or hook payloads.
-4. **Awaiting final review:** the user then marks 003 ready for reader/selection/verification and the scoped native schema/spec/fixture amendment. No implementation is authorized until that explicit decision; user merges without squash.
+4. **Final-review fixes complete:** the user then marks 003 ready for reader/selection/verification and the scoped native schema/spec/fixture amendment. No implementation is authorized until that explicit decision; user merges without squash.
 
 ## Explicit locators and source safety
 
@@ -64,7 +64,7 @@ Amend unreleased native v1 observation coverage with required `prefix_sha256`: S
 
 Coverage is already scoped by `(session_id, lane, input_id)`, so the stream key contains no session ID: `parent` for the parent or `agent:<agent_id>` for a subagent. Use **`input_id = parent#<n>` or `agent:<agent_id>#<n>`**. Paths, inodes and record content are not identity inputs; the fold is the authority for committed incarnation numbers within that session/stream.
 
-The locator spec bounds `agent_id` to **234 UTF-8 bytes**, nonempty valid Unicode scalar text. Reserve 5 ASCII bytes for `agent:`, 1 for `#`, and up to 16 decimal digits for a nonnegative safe-integer `n`, keeping the full ID within 256 bytes. Encode `n` in canonical decimal without leading zeros (except `0`); parse the final `#` suffix so an agent ID containing `#` remains unambiguous. Incarnation exhaustion fails visibly, never wraps or aliases an ID.
+The locator spec bounds `agent_id` to **233 UTF-8 bytes**, nonempty valid Unicode scalar text. Reserve 6 ASCII bytes for `agent:`, 1 for `#`, and up to 16 decimal digits for a nonnegative safe-integer `n`: 233 + 6 + 1 + 16 = 256 bytes. At `n = 9007199254740991`, a 233-byte agent ID produces exactly 256 bytes and is valid; a 234-byte agent ID produces 257 and is rejected. Encode `n` in canonical decimal without leading zeros (except `0`); parse the final `#` suffix so an agent ID containing `#` remains unambiguous. Incarnation exhaustion fails visibly, never wraps or aliases an ID.
 
 Resume algorithm:
 
@@ -100,6 +100,21 @@ Internal handoff: `(snapshot, native fold, verified incarnation, limits) -> (bou
 - Preserve verified per-record cwd. Resolve deterministic native path fields against it, not initial session cwd; absent/ambiguous cwd makes resolution unavailable. Do not infer file existence from prose or Bash output.
 - Retain bounded relevant user/assistant text and tool evidence deterministically, with structural omission/excerpt markers. Exclude hidden reasoning, unknown blocks and binary payloads; never fall back to dumping raw records. Excerpts must not masquerade as complete tool output. No model summarization.
 - Transcript instructions cannot change privacy/provider policy, execute tools or change limits. Context budgets cannot cover records left for later selection.
+
+### User-record attribution — approved, fail closed
+
+A non-attachment record's `user` role alone does not identify the human. Apply omission gates before inclusion, then classify retained evidence:
+
+- **`isMeta == true`:** omit with a content-free marker, including when the record contains tool-result blocks or otherwise has human origin.
+- **An `origin` is present but `origin.kind` is not `human`:** omit with a content-free marker. This includes `task-notification` (system notification), `peer` (untrusted input), any other/future value and missing/malformed kinds. Do not treat malformed origin as absent origin.
+- **Records containing `tool_result` blocks:** any retained material is **tool evidence**, never a user statement, regardless of origin, `promptSource` or parent/subagent stream. Mixed blocks cannot promote the record's surrounding text to a human statement.
+- **Parent user text with `origin.kind == "human"`:** attribute as **user**.
+- **Parent user text with no `origin`:** include labelled **user, origin unrecorded**, never as a verified human statement. If `promptSource == "sdk"`, label **SDK caller** instead. This fallback cannot bypass omission gates or tool-result classification.
+- **Subagent user text:** attribute as **delegating parent agent**, never the human, even if an origin field claims `human` or `promptSource` is `sdk`. The omission gates and tool-result classification still apply.
+
+Retain attribution labels in selected context and citation membership so stage 3 cannot flatten tool evidence, SDK calls or delegated prompts into human preferences/requests. These labels do not override model-generated compaction-summary provenance. Omission advances candidate progress only, with the same complete-record marker/digest rules as other exclusions.
+
+The reviewed structure-only counts for non-attachment user records explain this rule: 6113 carry tool-result blocks; 57 have `isMeta: true`; 104 have task-notification origin, 5 peer and 822 human. There are 240 parent records without origin (136 marked SDK) and 44 subagent prompts without origin. These are scoped observations, not universal schema guarantees or proof that categories are disjoint; no private values or payloads are included.
 
 ## Attachment record allowlist — approved
 
@@ -137,20 +152,21 @@ The private `Stop`/`SubagentStop` hook capture showed absolute paths and extra e
 
 Commit only reviewed structural findings and content-free manual outcomes, never source text, private paths/cwd/IDs, actual timestamps, raw prefix digests or hook stdin. Build invented synthetic fixtures from confirmed findings. Normal tests/CI never run the throwaway scan or manual checks and use no host transcripts, Claude installation, credentials or hooks. This task does not authorize this assistant to perform those checks or launch Claude sessions.
 
-No broad per-scenario probe workflow is required. Preserve evidence limits for unobserved variants, nested/parallel subagents or interruption behavior; the release Claude version floor remains a hooks-stage decision. D6 is satisfied, D1 is frozen and all user policy decisions for 003 are resolved. Only final review and the user's explicit ready decision remain before implementation.
+No broad per-scenario probe workflow is required. Preserve evidence limits for unobserved variants, nested/parallel subagents or interruption behavior; the release Claude version floor remains a hooks-stage decision. D6 is satisfied, D1 is frozen and all user policy decisions for 003 are resolved. The approved final-review fixes are complete; only the user's explicit ready decision remains before implementation.
 
 ## Acceptance criteria and planned evidence
 
 Unchecked until implementation; replace planned evidence with named tests/results before acceptance.
 
 - [ ] Contract and characterized locator/record shapes are reviewed; unverified behavior and investigated rewrites are identified honestly. Evidence: `docs/claude-transcripts.md` with versioned structural findings, manual `/compact`/`--resume` prefix comparisons and hook path-spelling outcomes, the approved attachment-record policy, and the user's ready decision.
-- [ ] Explicit parent/subagent locators select correct sources, including empty agent types, require absolute paths without tilde expansion, tolerate extra envelope fields and never discover transcripts. Missing subagent input is a normal no-op without errors, coverage or retries; healthy streams still progress. Evidence: parameterized fixtures with differing paths, `scratchpad_dir`/`prompt_id`/`effort`, absent subagent files with/without prior coverage, source/native byte invariance, UTF-8 agent-ID boundaries and 256-byte incarnation-ID limits.
+- [ ] Explicit parent/subagent locators select correct sources, including empty agent types, require absolute paths without tilde expansion, tolerate extra envelope fields and never discover transcripts. Missing subagent input is a normal no-op without errors, coverage or retries; healthy streams still progress. Evidence: parameterized fixtures with differing paths, `scratchpad_dir`/`prompt_id`/`effort`, absent subagent files with/without prior coverage, source/native byte invariance and UTF-8 agent-ID boundaries. Explicitly accept a 233-byte agent ID with `n = 9007199254740991` (256-byte input ID), reject a 234-byte agent ID with that `n` (257 bytes), and count multibyte IDs by UTF-8 bytes rather than characters.
 - [ ] Snapshot reads stay within initial size, consume only complete lines, detect observed inconsistent rewrites and leave sources unchanged. Evidence: injected append/rewrite/short-read/cancellation boundaries and byte/metadata comparisons.
 - [ ] Final symlinks/non-regular sources fail safely; symlinked ancestors work. Over-cap streams report `stream_too_large` without progress or large allocation. Evidence: temporary filesystem/boundary tests and fixed-chunk read assertions.
 - [ ] Prefix-bound observation coverage and successful empty commits round-trip; reflection coverage is unchanged; old observation fixtures are rejected, not migrated. Evidence: native spec/fold/replay and uncertain-acknowledgement interface tests.
 - [ ] Append/restart, middle-prefix rewrite, truncation, repeated same-first-record rewrite, relocation, same-content inode replacement and empty streams follow fold-derived incarnation rules. Unproven resume never advances coverage. Evidence: generated histories and synthetic native restart/commit-boundary tests.
 - [ ] Citations preserve exact UTF-8/CRLF bytes, UUID-present/absent attribution and characterized timestamps. Evidence: independent digest recomputation, byte ranges and native round-trips.
 - [ ] Selection is deterministic/bounded, orders by byte offset despite nonmonotonic timestamps, and preserves per-record cwd/assistant fragments without hidden reasoning, binary payloads or transcript-controlled policy. It uses approved record/subtype allowlists, distinguishes top-level attachments from content blocks, and never presents compaction summaries or unexpanded sidecars as original evidence. Evidence: parameterized interface/property tests and generated range/membership invariants.
+- [ ] Non-attachment user-record attribution fails closed: tool-result records never become user statements; meta/notification/peer/unknown or malformed-origin records are omitted; parent human text is user, absent-origin parent text is labelled user/origin unrecorded or SDK caller, and subagent user text is always delegating-parent-agent evidence, never human. Evidence: parameterized parent/subagent × tool-result present/absent (including mixed blocks) × `isMeta` true/false/absent × origin human/task-notification/peer/unknown/malformed/absent × `promptSource` SDK/other/absent fixtures. Assert precedence, exact retained labels, content-free omissions/candidate progress, payload non-leakage and original byte-range/digest membership, retaining compaction-summary provenance.
 - [ ] Attachment selection includes only human prompt-mode queued commands as user messages, file/edit filename-only markers and no other attachment payloads. Evidence: parameterized guard combinations, absent `humanTurn`, peer/task notifications, unknown types, `displayPath` fallback, payload sentinels in `content`/`snippet`/environment/session-context/credential records, no referenced-file I/O and exact range/digest membership.
 - [ ] Oversized lines never reach the parser; oversized/malformed/unknown complete lines advance with markers; partial tails do not. Hash-only scanning can exceed parsed/run limits without continuation state; normal-sized image/attachment lines retain surrounding text/tool evidence. Evidence: parser-not-called checks, full-line digest recomputation, limits/tails/mixed-block fixtures and accepted text-loss cases.
 - [ ] Recall reports all five verification statuses with shared support budgets, returns no source content and preserves stored memories; list never opens sources. Evidence: exact-match, same-size mutation, truncation, missing/final-symlink/ancestor-symlink/non-regular/permission/concurrent-read and budget boundary packaged tests; source/native byte invariance.
