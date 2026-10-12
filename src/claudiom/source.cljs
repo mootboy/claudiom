@@ -92,7 +92,8 @@
                           complete? (and (<= 0 lf) (< lf n))
                           next (if complete? (inc lf) n) segment (.subarray buf cursor next)
                           length (+ line-size (.-length segment)) oversized? (> length (:line_bytes bounds))
-                          fragments (if oversized? [] (conj fragments (js/Buffer.from segment)))
+                          fragments (if (or oversized? (> length (- (:parsed_bytes bounds) @usage)))
+                                      [] (conj fragments (js/Buffer.from segment)))
                           _ (.update line-hash segment) _ (.update prefix-hash segment)]
                       (if complete?
                         (if (and (not oversized?) (> (+ @usage length) (:parsed_bytes bounds)))
