@@ -1,6 +1,8 @@
 {:source-paths ["src" "test/cljs"]
  :builds
  {:cli {:target :esm
+        ;; Parallel compilation changes spec gensyms/field ordering between clean builds.
+        :compiler-options {:parallel-build false}
         :output-dir "dist"
         :js-options {:js-provider :import}
         :modules {:claudiom {:entries [claudiom.cli]
