@@ -17,15 +17,17 @@ After the observation loop, the same background Haiku writer calls `next_context
 - A committed reflection consolidates **exactly its validated supports**: implied fold status `consolidated`, no new event kind. Remove those observations from active listing, retain first definitions/citations and historic recall through reflection. Offered-but-unused observations remain active; empty/failed work consolidates nothing.
 - Multiple committed reflections consolidate their validated support union; replay is a no-op, not another archive pass. All definitions/supports/coverage form one atomic generation commit, with existing fsync/repair/error rules.
 - Retain drop/supersession/history and reflection support_changed consequences. No model-facing lifecycle editing; historical recall must not reinterpret consolidated as deleted or false.
-- Reflection and observation coverage remain independent. Freeze how a bounded active-observation table maps to stable observation-feed identity/positions, including still-active older observations and new progress. Do not renumber on consolidation or replay covered feed indefinitely merely because active count remains high.
+- Reflection and observation coverage remain independent. Use reflection input_id `observations#0`: first observation definitions receive stable zero-based feed positions in committed event/memory-array order; replay never adds positions. Consolidation/drop/supersession never renumbers the feed.
 
-## Engineering contract to freeze before readiness
+## Concrete defaults and selection
 
-Specify active-count eligibility, selection/order, stable feed positions/from/to, inclusion of older active supports, threshold reset and no-progress/empty-result behavior. Prevent endless reflection loops with unchanged supports; constrain accepted duplicate/concurrent support sets through locked native validation, not just best-effort leases.
+Eligibility requires at least **40 active observations** (configurable) and new feed positions after the latest reflection coverage `to`. Candidate range is `[from, min(from + 256, feed_length))`, starting at zero. Select active observations before candidate `to` in feed order, including older still-active observations before `from`, with at most **256 table entries / 128 KiB selected bytes**. If an item cannot fit, stop selecting; progress is processed feed bookkeeping, not an assertion every observation was supported. Table contains only already committed observations. No eligible new feed => no_context even if active count remains high: no repeated reflection over an unchanged feed.
 
-Freeze precedence/representation of consolidated versus dropped/superseded/support_changed statuses in active lists/historical recall, including superseding a consolidated support and recalling a later-dropped reflection. Preserve all evidence links, even when supports are no longer active. Empty reason remains fixed-enum metadata with coverage, never a consolidation instruction.
+Record at most **8 reflections**, **4 KiB text/reflection**, **32 distinct supports/reflection**, within 005's 256 KiB total tool limit. Use `{text, support_indices}` entries; resolve exclusively through handle table. Empty result advances its candidate feed range with fixed-enum reason but consolidates nothing. Previously unused observations can be offered again when new feed arrives; an unchanged-feed retry requires a still-valid handle, not new coverage.
 
-Retain bounded server-owned handles, independent lane leases, explicit session identity and narrow writer tools. No stage-2 source-code changes or added source discovery/content expansion.
+Consolidation is historical: dropping a reflection does not reactivate its supports. Keep existing lifecycle flags/correction links and add consolidated provenance; display precedence is dropped, superseded, support_changed (reflections), consolidated (observations), active. Superseding a consolidated observation still marks dependent reflections support_changed; its replacement is a separate new definition, not automatically consolidated. Historical support evidence remains recallable.
+
+Use 005's shared **5-minute** lane lease, memory-only **5-minute** handles, no renewal, and shared **16-commit / 10-minute** writer budget across both lanes. Record validates native reflection contiguity/support membership under the lock, subject to 004's accepted paused-owner stale-break risk; do not claim universal exclusion. No stage-2 source changes or source discovery/content expansion.
 
 ## Planned acceptance evidence
 
@@ -34,7 +36,7 @@ Retain bounded server-owned handles, independent lane leases, explicit session i
 - [ ] Reflection generation atomically commits supports/coverage; exactly supported observations become consolidated, unused supports remain active, and empty/failure/cancellation archive nothing.
 - [ ] Generated fold/replay histories cover multiple/overlapping support sets, restart, uncertain acknowledgement, contiguity, stable feed positions and no-progress/empty reflection loops.
 - [ ] Active list excludes consolidated observations; historical reflection/support recall preserves definitions/citations and existing source verification statuses, drop/correction/support_changed links.
-- [ ] Concurrent handles/lease expiry and crash boundaries do not produce inconsistent archives or unsafe duplicate progress; write lock is never held during agent work.
+- [ ] Ordinary concurrent handles/lease expiry and crash boundaries preserve contiguity/consolidation; accepted paused-owner stale-break overlap is documented rather than claimed eliminated. Write lock is never held during agent work.
 - [ ] Normal tests use synthetic native memories/fake delegation only; scoped opt-in real-use evidence evaluates inference/attribution without a truth guarantee.
 - [ ] npm test, clean CI, dist consistency and packaged native-reader tests pass with committed runtime for authorized behavior changes.
 

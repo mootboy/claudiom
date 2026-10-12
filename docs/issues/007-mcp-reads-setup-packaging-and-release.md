@@ -16,7 +16,7 @@ Ship explicit read-only MCP tools, `/claudiom:setup`, cache-contained plugin/pac
 
 ### MCP read tools
 
-Expose bounded list/recall against native project/session logs, not models. Freeze exact tool names/JSON/error shapes and project/session selection matching 004 CLI/URN routing. Read-only tools must not write registry/coverage, repair tails, trigger generation or require model credentials. Retain partial healthy results/warnings, unchanged lifecycle/consolidated history and bounded stage-2 citation statuses. Reflection recall includes historical supports. No automatic prompt/provenance injection or silently added cited-content expansion.
+Expose MCP `list({project, session_id})` and `recall({id, project, session_id})`, optional absolute project selector/session filter matching 004 CLI; recall ID may be URN or scoped local ID. Success is `{result, warnings, incomplete}` from native retrieval, missing recall fixed not_found error, invalid/unsafe/ambiguous/limited invocation fixed content-free error. Bound request to 16 KiB and response to **2 MiB**; larger complete result returns explicit limited error, never silently truncated data. Read-only: no models/state writes/repair/generation/credentials. Retain native healthy partial results, consolidated history and stage-2 citation statuses/supports. No prompt injection or cited-content expansion.
 
 Writer allowlist stays exactly next_context/record even when read tools are available to other callers. No producer-facing drop/supersede. Permission rules are not a justification for arbitrary project/source discovery.
 
@@ -24,13 +24,13 @@ Writer allowlist stays exactly next_context/record even when read tools are avai
 
 `/claudiom:setup` documents installation, storage/project scope, hooks, manual remember, default Haiku, best-effort live-session completeness, threshold/backoff/lease behavior and possible Claude Code model spend. No separate API keys, SDK, direct provider adapter or cost-ceiling promise.
 
-Document permission prompting and offer to persist an allow when the UI supports it; freeze actual syntax against supported Claude version. Allow rule names **exactly** `mcp__plugin_claudiom_claudiom__next_context` and `mcp__plugin_claudiom_claudiom__record`, never wildcard MCP permission. The user-run spike used auto mode: prompt/persistence and fresh-config behavior remain unverified/deferred for single-user 0.1.0, not falsely claimed as tested. Setup must not silently edit unrelated permissions/hooks/credentials.
+Document prompting/persisted allow where UI supports it; setup prints JSON permissions.allow containing exactly `mcp__plugin_claudiom_claudiom__next_context` and `mcp__plugin_claudiom_claudiom__record`, not wildcards or silent edits. Auto-mode spike did not test prompt persistence/fresh-config; those remain deferred, not claimed tested.
 
 ### Cache-contained distribution
 
 Use separate plugin root with manifest, hooks, MCP config, memory-writer agent, remember/setup skills and committed runtime inside it. No references outside installed cache root, dev dependency installs or JVM/compiler runtime requirement. Resolve version-specific plugin root each invocation; XDG authoritative logs/state survive plugin updates independently of plugin-data uninstall semantics.
 
-CLI/package and plugin remain GPL-3.0-only. Freeze supported Claude version floor using characterized 2.1.296 baseline and opt-in installed evidence; Node >=22.19.0. Validate --plugin-dir and actual marketplace/cache installation, manifests, exact tarball/checksum and runtime-only consumption. Distribution does not introduce npm lifecycle pushes or unattended npm publication.
+GPL-3.0-only CLI/plugin. Planned Claude Code floor **2.1.296**, Node >=22.19.0; older versions unsupported. Opt-in acceptance checks current supported installation/marketplace/cache, manifests/tarball/checksum/runtime-only consumption. No lifecycle pushes/unattended npm publication.
 
 ### Opt-in acceptance and release
 

@@ -2,64 +2,67 @@
 
 # In-session memory writer and observation tracer bullet
 
-- Status: proposed — plan only, explicit user readiness required before implementation
+- Status: proposed — plan only, explicit user readiness required
 - Category: enhancement
 - Parent: [001](001-initial-release.md)
-- Milestone: stage 4 of the [revised release plan](../plan-0.1.0.md#4-in-session-observation-tracer-bullet--issue-005)
+- Milestone: stage 4 of the [release plan](../plan-0.1.0.md#4-in-session-observation-tracer-bullet--issue-005)
 - Dependency: [004](004-store-lock-registry-and-hooks.md)
 
 ## Goal
 
-A background plugin `claudiom:memory-writer`, literal frontmatter `model: haiku`, generates observations through MCP `next_context`/`record`. `/claudiom:remember` delegates explicitly; Stop may occasionally nudge that skill. Claude Code owns generation/billing; no provider adapter, credential store or detached worker. Read [architecture](../architecture.md), [native contract](../native-persistence.md), [memory semantics](../memory-model.md) and [spike findings](../claude-integration.md).
+Background `claudiom:memory-writer`, literal `model: haiku`, generates observations via MCP next_context/record. `/claudiom:remember` delegates explicitly; Stop may nudge that skill. Claude Code owns generation/billing; no provider adapter, credentials or detached worker. Read [architecture](../architecture.md), [native contract](../native-persistence.md), [memory semantics](../memory-model.md) and [integration](../claude-integration.md). Accepted stage-2 source code stays unchanged.
 
-Completeness is best-effort during live sessions: work survives main-turn completion but was killed by `/exit` on 2.1.296. Uncovered progress stays visible; no SessionEnd flush promise. Stage-2 source code is unchanged.
+Completeness is best-effort: work outlives a main turn but was killed by /exit on 2.1.296. Uncovered progress remains visible; SessionEnd never promises flush.
 
-## Planned MCP trust boundary
+## Concrete MCP contract/defaults
 
-### next_context(session_id[, lane])
+### next_context({session_id, lane})
 
-- Take the fresh explicit session ID supplied by `${CLAUDE_SESSION_ID}` in the skill; never use stale MCP session env or accept model-provided source paths. Validate registered session/project against server scope from CLAUDE_PROJECT_DIR.
-- Read parent plus all eligible registered subagents, excluding the writer itself. Return one stream/range at a time with bounded selected content and exact citation indices/membership; no discovery or unselected raw-record fallback.
-- Use accepted source prefix verification/incarnation/byte-order/omission/missing-source rules. Missing sources, no eligible progress or limits do not fabricate coverage. Freeze deterministic stream ordering/fairness and no-context/busy status wire shape.
-- Create an opaque expiring server-side handle: session, project, lane, stream, input_id, from/to, prefix evidence, citation table and expiry. Keep table/response bounds finite; model cannot alter locators or coverage. Freeze handle entropy/expiry/count, server-restart behavior and project/session binding.
-- Best-effort range lease about **five minutes** limits duplicate selection across manual/nudge/background triggers. Freeze persistent lease ownership/expiry/release/renewal and bounded run limits; model time never holds native write lock. Lease loss cannot justify false progress.
-- Reflection lane is reserved until 006, not silently implemented as observation behavior.
+- Lane defaults to observation; reflection is unavailable until 006. Fresh explicit session ID comes from the skill's `${CLAUDE_SESSION_ID}`, not stale MCP session env/model paths. Validate against registered project mapped from CLAUDE_PROJECT_DIR.
+- Parent plus eligible registered subagents, excluding writer. Deterministic order: parent then agent_id byte order; select the first eligible uncovered stream, skipping busy/missing/limited streams. Committing coverage lets the finite invocation advance; no discovery or unselected raw fallback. Fair round-robin cursor in shared registry starts subsequent calls after the last offered stream.
+- Response status is `context`, `no_context`, `busy` or `limited`. `context` contains handle, expiry, lane and bounded selected records with reference indices. Other statuses contain no handle/candidate coverage; record cannot fabricate empty progress from them. Source failure uses fixed content-free MCP error.
+- Defaults: **128 KiB selected context**, **256 KiB total tool request/response**, **256 reference entries/handle**, **32 observations/record**, **4 KiB UTF-8 text/observation**, **32 citations/observation**. Retain source caps: 1 MiB/line, 256 MiB/stream, 32 MiB parsed bytes and 4096 records/run. If a normal record cannot fit the selected budget, report limited without skipping/covering it; other streams may progress. Native frame/log/schema limits still apply.
+- Handle is **128 random bits**, only in MCP-server memory, max **256 live handles/server**; binds project/session/lane/stream/input_id/from/to/prefix/reference table and event identity. Expiry is **5 minutes**, equal to lease. Server restart expires every handle: record fails without writing; native committed progress remains.
+- Persist **5-minute** range lease in the per-session XDG-state registry, claimed/checked under store lock. One active lease per session/lane; Stop suppresses nudges for either lane's active lease. No renewal for 0.1.0. Owner-token matching release on completion/failure; server restart leaves lease until expiry (best-effort delay), never coverage. Failed/expired handles release only their own lease.
+- Tool operation deadline **10 seconds**, including source reads/lock wait. Skill loop limit **16 successful commits or 10 minutes**, whichever first, shared across lanes. This is a cooperative run budget, not a model-cancellation/spend/lifetime guarantee. Hitting a limit leaves progress uncovered.
 
-### record(handle, memories[, reason])
+### record({handle, memories, reason})
 
-- Model proposes bounded text and citation indices into that handle, not native IDs/paths/coverage. Server mints identities and applies specs/native limits and source-time/attribution rules; freeze exact tool JSON shape before coding.
-- Revalidate handle expiry/project/session/lane/membership, source range/prefix and recovered native contiguity under the store lock, then append/fsync all-or-nothing. A real citation can support misleading text: accepted traceable risk, not truth certification.
-- Empty `record(handle, [], reason)` commits fixed-enum reason plus coverage; require complete valid input. Invalid/stale/replayed conflicting work, source rewrite, cancellation before commit or any failure commits nothing. Missing-subagent/no-context is not an empty-result commit.
-- Lost acknowledgement/repeated calls recover or replay a committed result rather than creating duplicate logical coverage. Freeze handle consumption/idempotency and durable-event linkage; server restart may invalidate volatile handles but cannot discard committed progress.
-- No model-facing drop/supersede, filesystem, arbitrary tool execution or credentials. Release/expire operational leases on completion/failure; crashed leases time out, not cover source.
+- Observations are `{text, citation_indices}` with distinct valid indices into this handle. Server mints IDs/event_id and source_time from the latest valid cited source timestamp (null if none); preserve source attribution and uncertainty in prompt/text. Model supplies neither native paths nor coverage.
+- Under store lock, revalidate expiry/scope/lane/membership, source prefix/range and recovered native contiguity/specs. Append all-or-nothing; authentic citations do not prove truthful interpretation. Respect 004's explicitly accepted stale-break race, not unconditional exclusion.
+- Empty memories require reason `routine | no_decisions | duplicate`; nonempty memories disallow reason. Empty results atomically commit native empty_reason and coverage. Missing/no-context/stale/expired/invalid/source-changed/cancelled work commits nothing.
+- Success returns `{status: committed, memory_ids}`. Fixed content-free errors reject invalid work; uncertain write acknowledges uncertainty, never optimistic coverage. No drop/supersede/filesystem/tool execution.
+- Mint event identity when handle is created. Keep accepted request/result until its original expiry: identical retry rereads/replays that event, changed request conflicts; an uncertain write is recovered before another attempt. Completion releases lease but leaves retry cache until expiry. After server restart old handles fail (even if they committed); native recovery/next_context sees committed coverage, not duplicate progress. No durable handle table required.
 
 ## Writer, skill and permissions
 
-- Skill `/claudiom:remember` is the sole delegation-instruction location and supplies fresh session ID to background `claudiom:memory-writer`. Manual invocation works in headless sessions. No standing SessionStart instruction or main-agent generation.
-- Writer loops bounded observation next_context/record until no work/busy/budget; never invent citations, weaken uncertainty, treat SDK/delegated/tool/compaction text as verified human facts, preserve or expose hidden reasoning, or store secrets. It may cite authentic selected records while interpretation remains auditable risk.
-- Literal `model: haiku` for 0.1.0; no userConfig model/Agent-model override contract. Allow only confirmed producer tool names `mcp__plugin_claudiom_claudiom__next_context` and `...__record` (observed built-in SubagentHandback remains). Test/opt-in validate restricted access; no silent delegation fallback.
-- Freeze context/item/text/citation/iterations/handle/lease bounds and cancellation statuses using accepted native/source ceilings. Claude Code owns model time/cost; bounds do not promise spend ceilings or survival on session exit.
-- Setup's exact permission allow rule arrives in 007; minimal development MCP/agent/skill wiring here is not installed-release acceptance. Auto-mode spike did not establish manual permission prompts/persistence.
+Skill is the sole delegation-instruction location; supplies fresh session ID to background writer, works manually in headless sessions and loops bounded next_context/record before stopping on no work/busy/limited/error. Reflection phase comes in 006. No standing SessionStart instruction/main-agent generation.
 
-## Stop nudge/backoff
+Fixed Haiku for 0.1.0, no model override/userConfig contract. Allow exactly `mcp__plugin_claudiom_claudiom__next_context` and `mcp__plugin_claudiom_claudiom__record` (plus observed built-in SubagentHandback). No general filesystem/other MCP/lifecycle tools or silent foreground fallback. Preserve accepted attribution/compaction labels; source text is data, not producer policy, and secrets/hidden reasoning are excluded.
 
-Stop uses registration + native fold + stat only; no transcript byte reads, generation, subprocess worker or hook-side delegation. Sum uncovered progress across registered streams; threshold configurable, default **40 KB ≈ 10K tokens**. Stat estimates are eligibility hints, not digest verification or coverage authority; source selection later verifies exact ranges.
+Minimal development wiring is not installed acceptance. 007 documents exact permissions; auto-mode spike did not establish prompt persistence. Claude owns model cost; bounded context/loops do not promise a spend ceiling.
 
-Nudge only if past threshold, not stop_hook_active, not observed/configurable sdk-cli, and no active lease. Emit exit-0 JSON `decision: block` with fixed reason roughly **"Claudiom: uncovered progress; run /claudiom:remember"**. Do not include paths/content/delegation commands. Any error => exit 0/empty stdout; never exit 2; timeout **5 seconds**. SessionEnd still only registers.
+## Stop signal, nudge and shared backoff
 
-Registry timestamp enforces at most one nudge per session per configurable N minutes, default **15**, until a lease or committed progress appears. Freeze precise reset semantics, clock-change handling and concurrent nudge claims. Ignored/classifier-blocked nudge does not recur every turn. Busy/stale triggers must not produce an infinite main-agent loop. The first old delegation-style nudge was classifier-flagged once; naming the skill is approved mitigation, not proven universal prevention.
+Stop uses registry + fold + stat only, **never transcript reads**. SessionStart captured **CLAUDE_CODE_ENTRYPOINT**: exactly `sdk-cli` suppresses nudge; any other, empty or absent value allows it. Missing signal is not an error or fail-closed gate. **005 opt-in real use must confirm `claude -p` supplies sdk-cli**; no claim this is already verified. Manual remember always works.
+
+Sum uncovered parent/subagent byte progress; threshold default **40,000 bytes ≈ 10K tokens**, configurable. Nudge only past threshold, not stop_hook_active, no active shared lease and eligible shared backoff. Stat is only a progress hint; source selection verifies bytes later.
+
+Return exit-0 JSON decision:block, fixed reason **"Claudiom: uncovered progress; run /claudiom:remember"**. No paths/content/delegation commands. Any genuine registry/fold/stat/lock error exits 0/empty stdout; never exit 2; timeout **5 seconds**. SessionEnd only registers.
+
+Store last_nudge_at and lease/commit reset metadata in the **shared per-session XDG-state registry**, not MCP memory. Under store lock, atomically claim a nudge then print it. Default **15-minute** backoff; a new lease or durable commit clears the previous nudge timestamp (active lease itself suppresses nudges). Ignored/classifier-blocked nudges do not reset backoff. Future last_nudge_at after wall-clock rollback suppresses until clock catches up; expired lease uses absolute wall-clock expiry. No endless turn-pressure retry on busy/errors. The skill-naming reason is approved classifier mitigation, not universal prevention.
 
 ## Planned acceptance evidence
 
-- [ ] Synthetic registered parent/subagent sources yield one bounded stream per call; missing/rewritten/oversized/omitted/partial data and no work preserve accepted stage-2 behavior and source bytes.
-- [ ] Handles reject forged/expired/wrong-project/foreign/stale ranges and invalid citation indices; full result validation precedes writes. No caller path/coverage injection or lifecycle edit tool.
-- [ ] Empty reasons, valid observations, restart/retry/lost acknowledgement and concurrent duplicate handles obey atomic native replay/contiguity; cancellation/errors cover nothing uncommitted.
-- [ ] Persistent lease tests with fake clocks cover duplicate triggers, expiry/server restart, release/renewal and agent killed before record, without treating lease as correctness or native write lock as model-work lock.
-- [ ] Fake delegation/MCP calls exercise bounded writer loops and attribution/secret/policy guards without real models, host transcripts or background agents in normal tests.
-- [ ] Parameterized Stop tests cover summed stat progress, stop_hook_active, sdk-cli/manual remember, active lease, backoff/reset/concurrency, classifier/ignored nudges and any-error fail-open; no transcript reads or exit 2.
-- [ ] Scoped opt-in real-use acceptance confirms skill's fresh session after /clear, fixed Haiku agent/tool restriction, live observation/empty commits, permission limitations and main-turn/session-exit behavior on the supported version.
-- [ ] Tests/clean CI/dist/packaging-development checks pass; later authorized runtime committed with behavior. Record unmatched/unfinished progress honestly, not as completed source.
+- [ ] Synthetic registered streams preserve all stage-2 snapshot/prefix/omission/missing-source rules, selection limits, round-robin ordering and unchanged bytes; limited/busy/no-context cannot fabricate coverage.
+- [ ] Random memory-only handles reject forged/expired/foreign/nonmember/stale requests; explicit count/byte/text/reference limits reject before writing.
+- [ ] Empty/nonempty commits, same-handle retry/conflict, uncertain acknowledgement and restart recover native progress atomically. Restart expires handles and old record calls fail without writes.
+- [ ] Shared XDG leases survive MCP restart, are visible to separate Stop process, expire at 5 minutes and release only matching ownership; lease is not correctness and lock is never held during model work.
+- [ ] Fake MCP/delegation exercises bounded writer loops/attribution/secrets without real models/host sources/background agents in normal tests.
+- [ ] Stop tests cover sdk-cli/cli/other/empty/absent env, manual remember, no transcript reads, summed stat threshold, active leases, atomic backoff/reset/concurrency, clock changes and genuine-error fail-open.
+- [ ] Opt-in real use confirms **-p => CLAUDE_CODE_ENTRYPOINT=sdk-cli**, skill's fresh /clear ID, fixed Haiku/two-tool restriction, observation/empty commits and main-turn/session-exit limits; absent env must not silently suppress nudges.
+- [ ] Tests/clean CI/dist pass; later authorized runtime committed with behavior. Unfinished/limited/exit-cancelled progress stays visibly uncovered.
 
 ## Scope/readiness
 
-Plan only; freeze tool/lease/limits/backoff engineering details and obtain explicit user readiness. 006 adds reflection loop/consolidation; 007 adds MCP reads/setup/installed packaging/release. No provider adapter, detached-worker probes, automatic provenance injection, configurable models, classifier rules or manual-mode permission-persistence project. Linus merges without squash.
+Concrete defaults above replace deferred-freeze questions. Code still requires explicit user readiness. 006 adds reflections/consolidation; 007 reads/setup/release. No provider adapter/worker/model configuration/classifier rules/provenance injection/manual permission-persistence project. Linus merges without squash.

@@ -2,61 +2,58 @@
 
 # Store amendment, write lock, locator registry and hook registration
 
-- Status: proposed — user-approved design direction; plan only, implementation requires explicit readiness
+- Status: proposed — user-approved design direction; plan only, explicit implementation readiness required
 - Category: enhancement
 - Parent: [001](001-initial-release.md)
-- Milestone: stage 3 of the [revised release plan](../plan-0.1.0.md#3-store-amendment-lock-registry-and-hook-registration--issue-004)
+- Milestone: stage 3 of the [release plan](../plan-0.1.0.md#3-store-amendment-lock-registry-and-hook-registration--issue-004)
 - Dependencies: accepted [002](002-native-persistence-and-reader.md) and [003](003-claude-source-reader-and-context-selection.md)
 
 ## Goal
 
-Provide the storage and session-registration boundary for in-session generation, without generation itself. Read the revised [architecture](../architecture.md), [native contract](../native-persistence.md) and [Claude integration/spike findings](../claude-integration.md). Reuse stage-2 source code unchanged. This replaces the retired provider-adapter 004 proposal; no API client/credential/worker work is authorized.
+Storage and registration for in-session generation, without generation itself. Read [architecture](../architecture.md), [native contract](../native-persistence.md) and [Claude integration](../claude-integration.md). Reuse stage-2 source code unchanged. No API client, credential adapter or detached worker.
 
-## Planned contract
+## Project layout and routing
 
-### Project layout and routing
+- Logs: `$XDG_DATA_HOME/claudiom/v1/projects/<claude-project-key>/<session_id>/events.jsonl`. Derive key from `basename(dirname(parent transcript_path))`, never from Claude's encoding algorithm or a subagent's deeper directory.
+- Raw project/session components are Unicode-scalar strings of 1–255 UTF-8 bytes; reject `.`, `..`, slash, backslash, NUL, C0 controls and DEL. No normalization. Events/registry must match the directory identity. Preserve native ownership/no-symlink checks.
+- Pre-release hashed `sessions/<sha256>/events.jsonl` is **unsupported and ignored**. No real data exists to migrate. No compatibility reader, migration, deletion or dual authoritative store.
+- MCP maps exact absolute `CLAUDE_PROJECT_DIR` through registry. SessionStart records `project_dir` from that env when present, otherwise its absolute cwd; subsequent cwd changes do not overwrite it. CLI `--project <absolute-project-dir>` selects an exact registered mapping; absent flag selects the longest registered ancestor of absolute cwd. Missing/conflicting mapping exits 2 with a fixed content-free diagnostic; no Claude transcript discovery.
+- `list` and local-ID recall/repair use project scope. URN recall searches session directory names across projects, independent of cwd unless `--project` explicitly restricts it. Duplicate matching sessions fail as ambiguous. Bound directory enumeration to 256 projects and 256 sessions per project; exceed either => invocation-wide exit 2, never truncated success. Read only the uniquely routed recall log. Corrupt unrelated log contents do not block a target write.
+- Registry mapping lookup is bounded to 4096 files and 16 MiB total parsed bytes per invocation; exceeded/unsafe shared roots fail explicitly. Partial session corruption still yields existing healthy-result warnings. Preserve current store/source limits and byte-preserving read/repair rules.
 
-- Authoritative logs: `$XDG_DATA_HOME/claudiom/v1/projects/<claude-project-key>/<session_id>/events.jsonl`.
-- Derive key from `basename(dirname(parent transcript_path))` in hooks; never reimplement Claude's project encoding or derive a subagent key from its deeper directory.
-- Use raw strictly validated session/project path components; preserve exact identities, reject traversal/unsafe values, do not normalize into collisions. Freeze validators/bounds, event-to-directory checks and Unicode handling before implementation.
-- MCP current project maps `CLAUDE_PROJECT_DIR` through registered absolute project identity. CLI uses cwd/`--project` with recorded mapping. Freeze exact selector/missing-registry behavior; no directory-discovery fallback to Claude transcripts.
-- Session cap is **256 per project**, checked under the write lock. URNs remain unchanged; URN recall finds a session directory by name across projects, opens only its uniquely routed log and fails on ambiguous duplicate identity. Freeze bounded project enumeration, warnings and root/per-project failure semantics.
-- Freeze explicit legacy hashed-layout treatment before changing reads/writes. No silent data deletion, guessed project migration or dual authoritative store. No version/tag/release action here.
-- Retain owner-only directories/logs, no-follow/identity checks, strict framed JSON, bounded reads, all-or-nothing fold, fsync acknowledgement and separate repair. A corrupt target blocks itself, not unrelated log contents.
+## Native amendment
 
-### Native empty/consolidation schema preparation
+- Empty generation events require `empty_reason: routine | no_decisions | duplicate`, committed with coverage; nonempty events disallow this field. Reject arbitrary reasons and incompatible shapes; deliberately update pre-release synthetic fixtures.
+- Document support-implied consolidation without a new event kind; behavior arrives in 006. Observation prefix/citation/incarnation semantics remain unchanged. No model-facing lifecycle editing.
 
-- Empty `generation` results must commit a fixed-enum reason with coverage for auditable ratios; proposed `empty_reason` field and enum `routine | no_decisions | duplicate` need exact spec freezing. No arbitrary diagnostic text; reason cannot authorize unsafe progress. Nonempty-result reason behavior must be specified consistently.
-- Prepare/document reflection-support-implied `consolidated` semantics without a new event kind; actual reflection selection/commit/consolidation behavior is delivered in 006. No model-facing lifecycle edit tools.
-- Observation prefix/contiguity/incarnation and citation version remain unchanged. Amend synthetic native fixtures deliberately; do not silently accept incompatible pre-release event shapes.
+## Store-wide lock: accepted single-user risk
 
-### Store-wide write lock
+- Owner-only lock at `$XDG_STATE_HOME/claudiom/v1/write.lock`, created with `O_EXCL`; default bounded wait **2 seconds**, retry every **25 ms**, stale at **30 seconds** by file age, never PID inference. Use absolute XDG_STATE_HOME or HOME/.local/state with existing private-root rules.
+- Contents contain a fresh 128-bit random ownership token. Release only when the current token matches; missing/replaced lock is not removed. No heartbeat, fencing protocol or elaborate stale-owner exclusion.
+- Hold for native fold/validate/append/fsync/repair **and registry/shared lease/backoff read-modify-write**. Never hold during model generation. Shared state uses same-directory temporary-file fsync + atomic rename + directory fsync.
+- **Accepted for 0.1.0:** an owner paused longer than 30 seconds (e.g. suspend mid-append) can overlap a stale breaker. This can corrupt the affected session log, which then refuses writes/complete-frame repair; unrelated session logs remain isolated. Atomic registry rename prevents torn JSON but cannot guarantee against a lost operational update in this exceptional race. Do not claim strict exclusion, power-loss proof or unconditional concurrent append safety.
+- Lock wait exhaustion returns bounded failure; registration hooks exit 0/empty stdout. SessionEnd overrides wait to **250 ms**, with a **1 second** script deadline to fit its shared ~1.5-second hook budget. Other hooks use the normal wait; Stop timeout remains 5 seconds.
 
-- Use private `O_EXCL` creation; bounded wait; stale break by **age**, not PID. Protect fold/validate/append/fsync and explicit repair across the store, never model generation.
-- Freeze lock path/wire ownership token, age/hold/wait limits, retry/jitter, release verification and crash-safe creation/removal. Every process observes one protocol; readers remain read-only.
-- Age does not prove a paused writer is dead. Fault-test stale breaker versus old-owner resume, token replacement, short writes and uncertain fsync. Resolve the exclusion protocol before claiming safe overlapping-process support; never rely on leases for append correctness.
-- No detached worker, inbox, polling process or generic lease framework.
+## Per-session registry and hook projection
 
-### Private locator registry and hooks
-
-- Register by explicit fresh session ID: parent locator, eligible subagent locators, project key and project-dir mapping. Private absolute XDG-state storage, strict bounded specs, atomic durable updates, owner-only/no-symlink checks and bounded content-free diagnostics.
-- One command script handles SessionStart, Stop, SubagentStop, SessionEnd. Only SubagentStop creates a subagent locator using agent_transcript_path. Other events strip incidental agent fields and create parent locators; source locator specs stay unchanged.
-- Ignore `agent_type == claudiom:memory-writer` SubagentStop entirely, preventing self-ingestion. Empty internal events lacking a usable agent path are no-ops; a registered but missing subagent later remains stage-2 missing-source no-op. No invented paths/discovery.
-- SessionStart registers, injects no standing instructions. SessionEnd only registers within its shared budget. Registration errors exit 0 with empty stdout; never exit 2. Minimal development hook scaffolding may be needed; installed/release packaging belongs to 007.
-- Registry reserves operational timestamps/lease references for 005, never advances coverage. Freeze entry/count/file/retention/update-concurrency limits; stale registry cannot override native logs or authorize another project/session.
-- Freeze how the observed/configurable `sdk-cli` headless classification reaches registry **without transcript reads in Stop**. Do not assume the undocumented CLI env value is equivalent to the transcript field. Unknown trigger state fails open, with no blocking nudge.
+- One `$XDG_STATE_HOME/claudiom/v1/registry/<session_id>.json` per session, **updated under the same store lock**. Stop/SubagentStop can arrive about one second apart; locked read-modify-write retains both locators. Use atomic replacement, never a shared unlocked registry blob.
+- Entry contains version, session/project identity, initial project_dir, parent/eligible subagent locators, entrypoint, last_seen_at, leases and nudge metadata. All fields use strict specs. Bounds: **1 MiB/file**, **256 subagent streams/session**, **4096 registry entries total**, source locator path/agent limits as accepted in 003. Exceeding a bound rejects the update, not silently evicts live streams.
+- Retain registry/shared operational state **30 days** after last_seen_at; lazily delete at most **32 expired entries per mutation** under the lock, only without an active lease. Future timestamps are retained. Cleanup never deletes authoritative logs; missing/expired registry means no source discovery or generation until registration returns.
+- One stdin-validating script handles SessionStart, Stop, SubagentStop, SessionEnd. Only SubagentStop projects a subagent locator with agent_transcript_path. Other events strip incidental agent fields and register parent locators; source specs stay unchanged.
+- Ignore `agent_type == claudiom:memory-writer` SubagentStop entirely. Empty internal events without usable agent paths are no-ops; missing registered sources retain stage-2 no-op behavior. SessionStart injects no standing instructions; SessionEnd only registers. Unknown envelope fields cannot authorize discovery.
+- **SessionStart captures `CLAUDE_CODE_ENTRYPOINT` in the registry. Exactly `sdk-cli` suppresses nudges; every other value, empty or absent permits nudges** subject to other eligibility rules. Never read transcript entrypoint in Stop. Missing env is not an error/fail-closed headless signal. Issue 005 opt-in real use must confirm `claude -p` yields `sdk-cli`; this is not yet confirmed evidence.
+- Operational leases/backoff are in this shared XDG-state entry, visible to Stop. Handles remain MCP-server memory only (005); registry never grants coverage authority. Minimal development hook scaffolding is allowed only after implementation readiness; installed packaging belongs to 007.
 
 ## Planned acceptance evidence
 
-- [ ] Project-key derivation uses explicit parent paths and tested mappings; raw path validators reject traversal, invalid Unicode, collisions and symlink/wrong-owner entries.
-- [ ] Project-scoped list/recall/repair, 256-session boundaries and bounded cross-project URN routing/ambiguity work with private synthetic projects; old-layout policy is explicit and byte-preserving where supported.
-- [ ] Empty reason schema round-trips atomically with coverage, rejects invalid/unknown/incompatible shapes and preserves replay/conflict/crash-safe native behavior.
-- [ ] Multi-process private-state tests cover lock wait/exhaustion, age breaking, old-owner resume, token-safe release, crashes and uncertain write/fsync/repair; no overlapping accepted append or optimistic coverage claim.
-- [ ] Parameterized synthetic hook stdin tests cover all four event projections, /clear's fresh session, extra agent fields on parent events, missing internal subagents and writer exclusion; no host transcript access or discovery.
-- [ ] Registry updates are private/bounded/restart-safe and do not change source/native coverage; concurrent hook registration cannot lose or forge project/session mappings.
-- [ ] SessionEnd only registers; hooks fail open/no exit 2; headless signal plumbing is documented and Stop does not read transcript bytes.
-- [ ] `npm test`, clean CI, dist consistency and packaged CLI tests pass with synthetic data only; stage-2 source file remains unchanged. Commit runtime with any later authorized behavior changes.
+- [ ] Synthetic project/component validation, exact mappings/cwd/--project, bounded cross-project URN ambiguity/routing and 256-session/256-project boundaries; old hashed path ignored and untouched.
+- [ ] Empty reason schema round-trips atomically; invalid/incompatible fields rejected, existing replay/crash/safety invariants retained.
+- [ ] Private multi-process lock tests cover 2-second exhaustion, 30-second age breaking, matching/mismatched token release and short-write/uncertain-fsync/repair boundaries. Paused-owner overlap is recorded as accepted risk, not required to be eliminated.
+- [ ] Parameterized hook projection covers all events, fresh /clear ID, incidental parent agent fields, writer exclusion, internal/missing subagents and entrypoint sdk-cli/other/absent behavior; Stop performs no transcript reads.
+- [ ] Concurrent Stop/SubagentStop updates preserve both locators; atomic registry writes, bounds/30-day cleanup and shared leases/backoff are private/restart-safe without changing coverage.
+- [ ] SessionEnd respects short lock/deadline budget, only registers; errors fail open/no exit 2. No host transcript/credential/discovery accesses.
+- [ ] npm test, clean CI, dist consistency and packaged CLI tests pass using synthetic data only; source.cljs remains unchanged. Commit runtime with later authorized behavior changes.
 
-## Readiness and scope
+## Scope/readiness
 
-Freeze the engineering contracts above, then obtain user readiness before implementation. These details do not reopen the approved in-session/Haiku/no-worker decisions. Generation MCP/agent/nudges/skills/leases are 005; reflections/consolidation behavior is 006; MCP reads/setup/installed release acceptance is 007. Preserve history; Linus merges without squash. No implementation in this planning PR.
+Defaults above are the concrete plan, not a list of decisions postponed to implementation. Explicit user readiness still gates code. 005 supplies generation/MCP/agent/nudge/remember; 006 reflections; 007 reads/setup/installed release. Linus merges without squash; no implementation in this PR.
