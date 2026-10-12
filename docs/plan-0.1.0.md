@@ -79,4 +79,6 @@ External integrations, databases, non-Claude hosts, alternative agent harnesses,
 
 ## Open decisions to resolve in the relevant PR
 
+Open decision — user approval required before stage 4: one corrupt complete session log blocks commits store-wide, because writers scan every session strictly and repair refuses malformed complete frames. This could prevent background-worker progress in unrelated sessions. Decide whether to retain explicit human intervention, add an operator-controlled quarantine command that renames the corrupt native log/session aside, or check global ID conflicts only against readable logs. Any choice must specify uniqueness, retained history/coverage and bounded visible worker failure. No policy change or quarantine implementation is authorized in stage 1.
+
 Publication; native schema and exact XDG layout; UUID-less citation locator; first explicit provider/model; numerical input/output/timeout/cost limits; credential policy; Claude minimum supported version and MCP/plugin install procedure. These are not silently decided by the bootstrap.

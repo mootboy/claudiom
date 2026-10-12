@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -28,17 +28,16 @@ test("compiled CLI disables generation and rejects unknown commands", () => {
   }
 });
 
-function installSyntheticFixture(root) {
-  const session = "synthetic";
+function installSyntheticFixture(root, session = "synthetic") {
   const dir = path.join(root, "claudiom", "v1", "sessions", createHash("sha256").update(session).digest("hex"));
   for (const suffix of ["claudiom", "claudiom/v1", "claudiom/v1/sessions", path.relative(root, dir)]) {
-    mkdirSync(path.join(root, suffix), { mode: 0o700 });
+    mkdirSync(path.join(root, suffix), { mode: 0o700, recursive: true });
   }
   const observation = { version: 1, event_id: "fixture-1", session_id: session,
     recorded_at: "2026-10-12T12:00:00Z", kind: "generation",
     coverage: { lane: "observation", input_id: "parent-1", from: 0, to: 100 },
     memories: [{ id: "observation-1", kind: "observation", text: "Synthetic decision.", source_time: null,
-      citations: [{ stream: "parent", agent_id: null, source_id: null, path: "/synthetic/unavailable.jsonl",
+      citations: [{ citation_version: 1, stream: "parent", agent_id: null, source_id: null, path: "/synthetic/unavailable.jsonl",
         locator: { input_id: "parent-1", start: 0, end: 100, sha256: "a".repeat(64) } }] }] };
   const reflection = { ...observation, event_id: "fixture-2",
     coverage: { lane: "reflection", input_id: "feed-1", from: 0, to: 1 },
@@ -62,9 +61,79 @@ test("packaged reader retrieves synthetic native memories across processes", () 
     assert.equal(spawnSync(process.execPath, [cli, "list", "--bad"], { cwd: root, env }).status, 2);
     writeFileSync(path.join(dir, "events.jsonl"), "private-invalid-content\n");
     const bad = spawnSync(process.execPath, [cli, "list"], { cwd: root, env, encoding: "utf8" });
-    assert.equal(bad.status, 2);
-    assert.equal(bad.stdout, "");
+    assert.equal(bad.status, 0);
+    assert.deepEqual(JSON.parse(bad.stdout), []);
+    assert.match(bad.stderr, new RegExp(`Corrupt session ${path.basename(dir)}; results incomplete`));
     assert.ok(!bad.stderr.includes("private-invalid-content"));
+    installSyntheticFixture(root, "healthy");
+    const partial = spawnSync(process.execPath, [cli, "list"], { cwd: root, env, encoding: "utf8" });
+    assert.equal(partial.status, 0);
+    assert.equal(JSON.parse(partial.stdout)[0].session_id, "healthy");
+    assert.ok(partial.stderr.includes(path.basename(dir)));
+    const healthy = spawnSync(process.execPath, [cli, "recall", "reflection-1"], { cwd: root, env, encoding: "utf8" });
+    assert.equal(healthy.status, 0);
+    assert.equal(JSON.parse(healthy.stdout).session_id, "healthy");
+    assert.ok(healthy.stderr.includes(path.basename(dir)));
+    const unavailable = spawnSync(process.execPath, [cli, "recall", "missing"], { cwd: root, env, encoding: "utf8" });
+    assert.equal(unavailable.status, 2);
+    assert.match(unavailable.stderr, /Memory unavailable; results incomplete/);
+    assert.equal(spawnSync(process.execPath, [cli, "repair", "--session", session], { cwd: root, env }).status, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readers warn about tails without writes; explicit repair is separate", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "claudiom-repair-"));
+  const env = { PATH: "", HOME: root, XDG_DATA_HOME: root };
+  const cli = path.join(repository, "cli.js");
+  try {
+    const { session, dir } = installSyntheticFixture(root);
+    const log = path.join(dir, "events.jsonl");
+    const clean = readFileSync(log, "utf8");
+    const tail = '{"unfinished":';
+    appendFileSync(log, tail);
+    for (const args of [["list"], ["recall", "reflection-1"], ["list", "--session", session]]) {
+      const result = spawnSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: "utf8" });
+      assert.equal(result.status, 0);
+      assert.match(result.stderr, new RegExp(`Repair needed for session ${path.basename(dir)}; results incomplete`));
+      assert.equal(readFileSync(log, "utf8"), clean + tail);
+      JSON.parse(result.stdout);
+    }
+    assert.deepEqual(JSON.parse(invoke(cli, ["repair", "--session", session], root, env)),
+      { repaired: true, removed_bytes: Buffer.byteLength(tail) });
+    assert.equal(readFileSync(log, "utf8"), clean);
+    assert.deepEqual(JSON.parse(invoke(cli, ["repair", "--session", session], root, env)),
+      { repaired: false, removed_bytes: 0 });
+    const repaired = spawnSync(process.execPath, [cli, "list"], { cwd: root, env, encoding: "utf8" });
+    assert.equal(repaired.stderr, "");
+    assert.equal(spawnSync(process.execPath, [cli, "repair"], { cwd: root, env }).status, 2);
+    assert.deepEqual(JSON.parse(invoke(cli, ["repair", "--session", "missing"], root, env)),
+      { repaired: false, removed_bytes: 0 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unrelated torn tail does not make a missing memory unavailable", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "claudiom-missing-tail-"));
+  const env = { PATH: "", HOME: root, XDG_DATA_HOME: root };
+  const cli = path.join(repository, "cli.js");
+  try {
+    installSyntheticFixture(root);
+    const { dir } = installSyntheticFixture(root, "unrelated");
+    const log = path.join(dir, "events.jsonl");
+    const event = JSON.parse(readFileSync(log, "utf8").split("\n")[0]);
+    event.memories = [];
+    const bytes = JSON.stringify(event) + '\n{"unfinished":';
+    writeFileSync(log, bytes);
+    const missing = spawnSync(process.execPath, [cli, "recall", "missing"], { cwd: root, env, encoding: "utf8" });
+    assert.equal(missing.status, 1);
+    assert.equal(missing.stdout, "");
+    assert.match(missing.stderr, new RegExp(`Repair needed for session ${path.basename(dir)}; results incomplete`));
+    assert.match(missing.stderr, /Memory not found\./);
+    assert.ok(!missing.stderr.includes("Memory unavailable"));
+    assert.equal(readFileSync(log, "utf8"), bytes);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

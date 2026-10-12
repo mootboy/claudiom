@@ -56,11 +56,18 @@
        (fs/appendFileSync p "{\"unfinished\":")
        (is (= {["observation" "parent-1"] 100} (:coverage (:state (store/read-log p)))))
        (is (> (.-size (fs/statSync p)) (js/Buffer.byteLength before)))
-       (store/append! event)
+       (let [tailed (fs/readFileSync p "utf8")]
+         (is (:repair_needed (store/read-log p)))
+         (is (thrown? js/Error (store/append! event)))
+         (is (= tailed (fs/readFileSync p "utf8")))
+         (is (= {:repaired true :removed_bytes 14} (store/repair! "synthetic"))))
        (is (= before (fs/readFileSync p "utf8")))
+       (store/append! event)
+       (is (= {:repaired false :removed_bytes 0} (store/repair! "synthetic")))
        (fs/appendFileSync p "not-json\n")
        (is (thrown? js/Error (store/read-log p)))
-       (is (thrown? js/Error (store/append! event)))))))
+       (is (thrown? js/Error (store/append! event)))
+       (is (thrown? js/Error (store/repair! "synthetic")))))))
 
 (deftest contiguous-independent-progress
   (private-state
@@ -75,7 +82,7 @@
 
 (def observation
   {:id "observation-1" :kind "observation" :text "Synthetic decision." :source_time nil
-   :citations [{:stream "parent" :agent_id nil :source_id nil :path "/synthetic/source.jsonl"
+   :citations [{:citation_version 1 :stream "parent" :agent_id nil :source_id nil :path "/synthetic/source.jsonl"
                 :locator {:input_id "parent-1" :start 0 :end 100 :sha256 (apply str (repeat 64 "a"))}}]})
 
 (defn lifecycle-event [id kind fields]
@@ -165,6 +172,8 @@
                                           (throw (js/Error. "Synthetic interrupted write."))))]
        (is (thrown? js/Error (store/append! event))))
      (is (= {} (:coverage (:state (store/read-log (store/log-path "synthetic"))))))
+     (is (thrown? js/Error (store/append! event)))
+     (store/repair! "synthetic")
      (store/append! event)
      (is (= 1 (count (:events (store/read-log (store/log-path "synthetic")))))))))
 
@@ -286,11 +295,88 @@
      (let [p (store/log-path "synthetic") next (assoc event :event_id "next"
                                                    :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})]
        (fs/appendFileSync p "unfinished")
+       (is (thrown? js/Error (store/append! next)))
        (with-redefs [store/sync! (fn [_] (throw (js/Error. "Synthetic repair sync failure.")))]
-         (is (thrown? js/Error (store/append! next))))
+         (is (thrown? js/Error (store/repair! "synthetic"))))
        (is (= 100 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))
        (store/append! next)
        (is (= 200 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))))))
+
+(deftest citation-version-is-required-and-independent
+  (private-state
+   (fn [_]
+     (doseq [citation [(dissoc (first (:citations observation)) :citation_version)
+                      (assoc (first (:citations observation)) :citation_version 2)]]
+       (is (thrown? js/Error (store/append! (assoc event :memories [(assoc observation :citations [citation])])))))
+     (is (not (fs/existsSync (store/root))))
+     (store/append! (assoc event :memories [observation]))
+     (is (= 1 (:citation_version (first (:citations (store/recall "observation-1" nil)))))))))
+
+(deftest complete-json-without-lf-is-uncommitted
+  (private-state
+   (fn [_]
+     (store/append! event)
+     (let [p (store/log-path "synthetic") next (assoc event :event_id "unterminated"
+                                                   :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200})
+           json (js/JSON.stringify (clj->js next))]
+       (fs/appendFileSync p json)
+       (is (= 100 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))
+       (is (= "repair_needed" (:kind (first (:warnings (store/retrieve "list" nil nil))))))
+       (is (thrown? js/Error (store/append! next)))
+       (is (= (js/Buffer.byteLength json) (:removed_bytes (store/repair! "synthetic"))))
+       (store/append! next)
+       (is (= 200 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))))))
+
+(deftest partial-retrieval-quarantines-conflicts-but-writer-stays-strict
+  (private-state
+   (fn [_]
+     (store/append! (assoc event :memories [observation]))
+     (let [other (store/log-path "duplicate")]
+       (store/ensure-path! (path/dirname other) true)
+       (fs/writeFileSync other (str (js/JSON.stringify (clj->js (assoc event :session_id "duplicate" :memories [observation]))) "\n") #js {:mode 384}))
+     (let [healthy (store/log-path "healthy")]
+       (store/ensure-path! (path/dirname healthy) true)
+       (fs/writeFileSync healthy (str (js/JSON.stringify (clj->js (assoc event :session_id "healthy"
+                                                                 :memories [(assoc observation :id "healthy-observation")]))) "\n") #js {:mode 384}))
+     (let [{:keys [result warnings incomplete]} (store/retrieve "list" nil nil)]
+       (is incomplete)
+       (is (= ["healthy-observation"] (mapv :id result)))
+       (is (= ["conflict" "conflict"] (mapv :kind warnings)))
+       (is (= #{(path/basename (path/dirname (store/log-path "synthetic")))
+                (path/basename (path/dirname (store/log-path "duplicate")))}
+              (set (map :session_hash warnings)))))
+     (is (nil? (:result (store/retrieve "recall" "observation-1" nil))))
+     (is (thrown? js/Error (store/append! (assoc event :event_id "next"
+                                               :coverage {:lane "observation" :input_id "parent-1" :from 100 :to 200}))))
+     (fs/writeFileSync (store/log-path "duplicate") "private corrupt content\n")
+     (let [before (fs/readFileSync (store/log-path "synthetic") "utf8")]
+       (is (thrown? js/Error (store/append! event)))
+       (is (= before (fs/readFileSync (store/log-path "synthetic") "utf8")))))))
+
+(deftest repair-retry-syncs-after-uncertain-truncation
+  (private-state
+   (fn [_]
+     (store/append! event)
+     (fs/appendFileSync (store/log-path "synthetic") "tail")
+     (with-redefs [store/sync! (fn [_] (throw (js/Error. "Synthetic failed repair sync.")))]
+       (is (thrown? js/Error (store/repair! "synthetic"))))
+     (is (not (:repair_needed (store/read-log (store/log-path "synthetic")))))
+     (let [synced (atom 0)]
+       (with-redefs [store/sync! (fn [fd] (swap! synced inc) (fs/fsyncSync fd))]
+         (is (= {:repaired false :removed_bytes 0} (store/repair! "synthetic"))))
+       (is (= 1 @synced))))))
+
+(deftest small-log-read-allocation-follows-file-size
+  (private-state
+   (fn [_]
+     (store/append! event)
+     (let [p (store/log-path "synthetic") size (.-size (fs/statSync p))
+           original (.-alloc js/Buffer) allocations (atom [])]
+       (try
+         (set! (.-alloc js/Buffer) (fn [n] (swap! allocations conj n) (.call original js/Buffer n)))
+         (is (= 100 (get-in (store/read-log p) [:state :coverage ["observation" "parent-1"]])))
+         (is (= [(inc size)] @allocations))
+         (finally (set! (.-alloc js/Buffer) original)))))))
 
 (deftest unsafe-storage-is-rejected
   (doseq [scenario [:relative :empty :symlink :permissions :directory-permissions :log-symlink :directory-log :dangling]]

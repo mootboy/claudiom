@@ -1,6 +1,7 @@
 (ns claudiom.store
   (:require [cljs.spec.alpha :as s]
             [clojure.string :as str]
+            [clojure.set :as set]
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:crypto" :as crypto]))
@@ -37,8 +38,9 @@
 (s/def ::agent_id (s/nilable identifier?))
 (s/def ::source_id (s/nilable identifier?))
 (s/def ::path #(and (string? %) (path/isAbsolute %) (<= (js/Buffer.byteLength %) 4096)))
-(s/def ::citation (s/and (s/keys :req-un [::stream ::agent_id ::source_id ::path ::locator])
-                        #(exact-keys? % [:stream :agent_id :source_id :path :locator])
+(s/def ::citation_version #{1})
+(s/def ::citation (s/and (s/keys :req-un [::citation_version ::stream ::agent_id ::source_id ::path ::locator])
+                        #(exact-keys? % [:citation_version :stream :agent_id :source_id :path :locator])
                         #(if (= "parent" (:stream %)) (nil? (:agent_id %)) (identifier? (:agent_id %)))))
 (s/def ::citations (s/coll-of ::citation :kind vector? :min-count 1 :max-count 256))
 (s/def ::supports (s/coll-of identifier? :kind vector? :min-count 1 :max-count 256 :distinct true))
@@ -172,12 +174,13 @@
         (try
           (let [opened (fs/fstatSync fd)]
             (when-not (and (= (.-ino st) (.-ino opened)) (= (.-dev st) (.-dev opened))) (fail))
-            (let [bytes (js/Buffer.alloc 16777217)
+            (let [capacity (inc (min (.-size opened) 16777216))
+                  bytes (js/Buffer.alloc capacity)
                   n (loop [offset 0]
                       (if (= offset (.-length bytes)) offset
                           (let [n (fs/readSync fd bytes offset (- (.-length bytes) offset) nil)]
                             (if (zero? n) offset (recur (+ offset n))))))
-                  _ (when (> n 16777216) (fail))
+                  _ (when (or (> n 16777216) (> n (.-size opened))) (fail))
                   data (.subarray bytes 0 n)
                   end (inc (.lastIndexOf data 10))
                   complete (.subarray data 0 end)
@@ -187,10 +190,11 @@
                                  (when (or (empty? line) (> (inc (js/Buffer.byteLength line)) 1048576)) (fail))
                                  (parse-event line)) lines)]
               (when (> (- n end) 1048576) (fail))
-              {:events events :state (fold-events events) :end end :size n}))
+              {:events events :state (fold-events events) :end end :size n
+               :identity [(.-dev opened) (.-ino opened)] :repair_needed (> n end)}))
           (finally (fs/closeSync fd)))))
     (catch :default e
-      (if (= "ENOENT" (.-code e)) {:events [] :state (fold-events []) :end 0 :size 0}
+      (if (= "ENOENT" (.-code e)) {:events [] :state (fold-events []) :end 0 :size 0 :repair_needed false}
           (fail)))))
 
 (declare read-states validate-global!)
@@ -203,12 +207,14 @@
   (when-not (s/valid? ::event event) (fail))
   (let [p (log-path (:session_id event))
         {:keys [events state end size]} (read-log p)
-        _ (when (and (:session state) (not= (:session_id event) (:session state))) (fail))
+        _ (when (or (> size end) (and (:session state) (not= (:session_id event) (:session state)))) (fail))
         next-state (fold-events (conj events event))
         replay? (contains? (:seen state) (:event_id event))
         bytes (js/Buffer.from (str (js/JSON.stringify (clj->js event)) "\n"))]
     (when (or (> (.-length bytes) 1048576)
               (> (+ end (if replay? 0 (.-length bytes))) 16777216)) (fail))
+    ;; ponytail: global identity checks read up to 256 × 16 MiB per commit.
+    ;; Upgrade with a disposable ID index under XDG state, verified against logs.
     (let [states (read-states nil)]
       (when (and (>= (count states) 256) (not (fs/existsSync (path/dirname p)))) (fail))
       (validate-global! (conj (vec (remove #(= (:session_id event) (:session %)) states)) next-state)))
@@ -221,7 +227,6 @@
           (when (or (not (.isFile st)) (not= (.-uid st) (js/process.geteuid))
                     (not= 0 (bit-and (.-mode st) 63)) (not= size (.-size st))
                     (and prior (or (not= (.-ino prior) (.-ino st)) (not= (.-dev prior) (.-dev st))))) (fail)))
-        (when (> size end) (fs/ftruncateSync fd end) (sync! fd))
         (when-not replay?
           (loop [offset 0]
             (when (< offset (.-length bytes))
@@ -234,22 +239,47 @@
       (try (sync! fd) (finally (fs/closeSync fd))))
     next-state))
 
-(defn read-states [session]
-  (if session
-    (let [state (:state (read-log (log-path session)))]
-      (when (and (:session state) (not= session (:session state))) (fail))
-      [state])
-    (let [r (root)]
-      (ensure-path! r false)
-      (if-not (fs/existsSync r) []
-        (let [entries (vec (array-seq (fs/readdirSync r)))]
-          (when (> (count entries) 256) (fail))
-          (mapv (fn [entry]
-                  (when-not (re-matches #"[0-9a-f]{64}" entry) (fail))
-                  (let [p (path/join r entry "events.jsonl")
-                        state (:state (read-log p))]
-                    (when (and (:session state) (not= p (log-path (:session state)))) (fail))
-                    state)) entries))))))
+(defn repair! [session]
+  (let [p (log-path session)
+        {:keys [state end size identity repair_needed]} (read-log p)]
+    (when (and (:session state) (not= session (:session state))) (fail))
+    (when identity
+      (let [fd (fs/openSync p (bit-or (.-O_RDWR fs/constants) (.-O_NOFOLLOW fs/constants)))]
+        (try
+          (let [st (fs/fstatSync fd)]
+            (when (or (not (.isFile st)) (not= identity [(.-dev st) (.-ino st)])
+                      (not= size (.-size st)) (not= (.-uid st) (js/process.geteuid))
+                      (not= 0 (bit-and (.-mode st) 63))) (fail)))
+          (when repair_needed (fs/ftruncateSync fd end))
+          ;; Also sync an already-repaired file: a prior truncate may have
+          ;; succeeded before its acknowledgement/fsync failed.
+          (sync! fd)
+          (finally (fs/closeSync fd)))))
+    {:repaired repair_needed :removed_bytes (- size end)}))
+
+(defn read-states
+  ([session] (read-states session false))
+  ([session partial?]
+   (let [r (root)
+         _ (ensure-path! r false)
+         entries (if session [(path/basename (path/dirname (log-path session)))]
+                     (if (fs/existsSync r) (sort (array-seq (fs/readdirSync r))) []))]
+     (when (> (count entries) 256) (fail))
+     (reduce
+      (fn [states entry]
+        (when-not (re-matches #"[0-9a-f]{64}" entry) (fail))
+        (try
+          (let [p (path/join r entry "events.jsonl")
+                {:keys [state repair_needed]} (read-log p)]
+            (when (and (:session state) (not= p (log-path (:session state)))) (fail))
+            (with-meta (conj states (assoc state :session_hash entry))
+              {:warnings (cond-> (:warnings (meta states))
+                           repair_needed (conj {:kind "repair_needed" :session_hash entry}))}))
+          (catch :default _
+            (if partial?
+              (with-meta states {:warnings (conj (:warnings (meta states)) {:kind "corrupt" :session_hash entry})})
+              (fail)))))
+      (with-meta [] {:warnings []}) entries))))
 
 (defn validate-global! [states]
   (reduce (fn [seen state]
@@ -269,20 +299,27 @@
     (:citations m) (update :citations #(mapv (fn [c] (assoc c :source_status "not_checked")) %))
     (get-in state [:superseded (:id m)]) (assoc :supersession (get-in state [:superseded (:id m)]))))
 
-(defn list-memories [session]
-  (let [states (read-states session)]
-    (validate-global! states)
-    (->> states
-         (mapcat (fn [state] (for [m (vals (:definitions state)) :when (= "active" (lifecycle state m))]
-                              (present state m))))
-         (sort-by (juxt :recorded_at :id)) vec)))
+(defn retrieve [command id session]
+  (when (and (= command "recall") (not (identifier? id))) (fail))
+  (let [states (read-states session true)
+        owners (reduce (fn [owners state]
+                         (reduce #(update %1 %2 (fnil conj #{}) (:session_hash state))
+                                 owners (keys (:definitions state)))) {} states)
+        conflicting (apply set/union #{} (filter #(> (count %) 1) (vals owners)))
+        healthy (remove #(contains? conflicting (:session_hash %)) states)
+        warnings (into (:warnings (meta states))
+                       (map #(hash-map :kind "conflict" :session_hash %) (sort conflicting)))
+        result (if (= command "list")
+                 (->> healthy
+                      (mapcat (fn [state] (for [m (vals (:definitions state)) :when (= "active" (lifecycle state m))]
+                                           (present state m))))
+                      (sort-by (juxt :recorded_at :id)) vec)
+                 (some (fn [state]
+                         (when-let [m (get-in state [:definitions id])]
+                           (cond-> (present state m)
+                             (:supports m) (assoc :supporting_observations
+                                                  (mapv #(present state (get-in state [:definitions %])) (:supports m)))))) healthy))]
+    {:result result :warnings warnings :incomplete (boolean (some #(contains? #{"corrupt" "conflict"} (:kind %)) warnings))}))
 
-(defn recall [id session]
-  (when-not (identifier? id) (fail))
-  (let [states (read-states session)]
-    (validate-global! states)
-    (some (fn [state]
-            (when-let [m (get-in state [:definitions id])]
-              (cond-> (present state m)
-                (:supports m) (assoc :supporting_observations
-                                     (mapv #(present state (get-in state [:definitions %])) (:supports m)))))) states)))
+(defn list-memories [session] (:result (retrieve "list" nil session)))
+(defn recall [id session] (:result (retrieve "recall" id session)))
